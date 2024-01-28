@@ -18,6 +18,7 @@ impl Card {
 
 #[derive(Clone)]
 pub struct LatentCard {
+    pub cost: ManaCost,
     pub name: String,
     pub flavor: String,
     pub card_types: Vec<CardType>,
@@ -28,9 +29,10 @@ pub struct LatentCard {
 }
 
 impl LatentCard {
-    pub fn new(name: String, flavor: String, card_types: Vec<CardType>, card_subtypes: Vec<String>, abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
+    pub fn new(name: String, cost: ManaCost,  flavor: String, card_types: Vec<CardType>, card_subtypes: Vec<String>, abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
         Self {
             name,
+            cost,
             flavor,
             card_types,
             card_subtypes,

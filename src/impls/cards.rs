@@ -7,12 +7,13 @@ pub fn get_card(name: &str) -> LatentCard {
     match name {
         "mountain" => LatentCard::new(
             "Mountain".into(),
+            ManaCost::empty(),
             "One day, night will come to these mountains.".into(), 
             vec![Basic, Land(Red)],
             vec![],
             vec![ 
                 LatentAbility {
-                    class: AbilityClass::Activated(Cost::new().with_tap()),
+                    class: AbilityClass::Activated(Cost::empty().with_tap()),
                     description: "Add one red mana".into(),
                     effect: Effect::OneShot(AddManaEffect::new(Red)),
                 },
@@ -22,6 +23,7 @@ pub fn get_card(name: &str) -> LatentCard {
 
         "miraris wake" => LatentCard::new(
             "Mirari's Wake".into(),
+            ManaCost::empty(),
             "Even after a false god tore the magic from Dominaria, power still radiated from the Mirari sword that slew her.".into(),
             vec![Enchantment],
             vec![],
@@ -42,6 +44,7 @@ pub fn get_card(name: &str) -> LatentCard {
 
         "goblin assailant" => LatentCard::new(
             "Goblin Assailant".into(),
+            ManaCost::empty(),
             "What he lacks in patience, intelligence, empathy, lucidity, hygiene, ability to follow orders, self-regard, and discernible skills, he makes up for in sheer chaotic violence.".into(),
             vec![Creature],
             vec!["Goblin".into(), "Warrior".into()],
