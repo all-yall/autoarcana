@@ -21,17 +21,19 @@ pub struct LatentCard {
     pub name: String,
     pub flavor: String,
     pub card_types: Vec<CardType>,
+    pub card_subtypes: Vec<String>,
     pub abilities: Vec<LatentAbility>,
     pub power: Option<i32>,
     pub toughness: Option<i32>,
 }
 
 impl LatentCard {
-    pub fn new(name: String, flavor: String, card_types: Vec<CardType>, abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
+    pub fn new(name: String, flavor: String, card_types: Vec<CardType>, card_subtypes: Vec<String>, abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
         Self {
             name,
             flavor,
             card_types,
+            card_subtypes,
             abilities,
             power,
             toughness
