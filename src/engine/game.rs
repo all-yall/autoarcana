@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, process::exit};
 
 use crate::{engine::prelude::*, client::GameStateSnapshot};
-use crate::client::{Client, PlayerActionRequest, PlayerActionResponse, PlayerAction};
+use crate::client::{Client, PlayerAction};
 
-use super::{temp_client::choose_options, util::id::IDFactory};
+use super::{util::id::IDFactory};
 
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 

@@ -41,7 +41,7 @@ pub fn choose_options<T> (prompt: &str, options: &[(&str, T)]) -> Vec<T>
                     option.0 ^= true;
                 }
             }
-            Err(err) => {}
+            Err(_err) => {}
         }
         let eraser = String::from(" ").repeat(longest_line);
         (0..(options.len()+2)).into_iter().for_each(|_| {

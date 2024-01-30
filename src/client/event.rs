@@ -1,7 +1,7 @@
 use std::{
     sync::mpsc::{self, RecvTimeoutError},
     thread,
-    time::{Duration, Instant},
+    time::{Duration},
 };
 use color_eyre::Result;
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};

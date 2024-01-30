@@ -6,7 +6,7 @@ use ratatui::{
 
 use crate::client::app::App;
 
-pub fn render(app: &mut App, f: &mut Frame) {
+pub fn render(_app: &mut App, f: &mut Frame) {
     f.render_widget(
         Paragraph::new(format!(
             "
