@@ -12,9 +12,8 @@ use color_eyre::Result;
 use log::info;
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
-    #[default]
     Running,
     Quitting
 }
@@ -79,7 +78,7 @@ impl App {
             if let Some(event) = tui.events.next(timeout)? {
                 info!("Received user input: {event:?}");
                 match event {
-                    Event::Tick => self.tick(),
+            //        Event::Tick => self.tick(),
                     Event::Key(key_event) => self.update(key_event),
                     Event::Mouse(_) => {},
                     Event::Resize(_, _) => {},
