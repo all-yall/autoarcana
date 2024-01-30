@@ -9,6 +9,7 @@ use super::event::{Event, EventHandler};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use color_eyre::Result;
+use log::info;
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -55,29 +56,40 @@ impl App {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        info!("Starting clientside application");
+
+        info!("Initializing backend terminal");
         let backend = ratatui::backend::CrosstermBackend::new(std::io::stderr());
+
+        info!("Initializing ratatui terminal");
         let terminal = ratatui::Terminal::new(backend)?;
+
+        info!("Configuring user event handler");
         let events = EventHandler::new();
         let mut tui = Tui::new(terminal, events);
         tui.enter()?;
 
         let timeout = Duration::from_millis(400);
+        info!("Entering main loop");
         while self.running() {
             // draw to screen
             tui.draw(self)?;
 
             // handle player input
-            match tui.events.next(timeout)? {
-                Some(Event::Tick) => self.tick(),
-                Some(Event::Key(key_event)) => self.update(key_event),
-                Some(Event::Mouse(_)) => {},
-                Some(Event::Resize(_, _)) => {},
-                None => {},
+            if let Some(event) = tui.events.next(timeout)? {
+                info!("Received user input: {event:?}");
+                match event {
+                    Event::Tick => self.tick(),
+                    Event::Key(key_event) => self.update(key_event),
+                    Event::Mouse(_) => {},
+                    Event::Resize(_, _) => {},
+                }
             };
 
             // handle game updates from server
             match self.game_update.try_recv()  {
                 Ok(state) => {
+                    info!("Received game update");
                     self.game_state = Some(state);
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
@@ -91,6 +103,7 @@ impl App {
             if self.curr_request.is_none() {
                 match self.requests.try_recv() {
                     Ok(request) => {
+                        info!("Received request for player to make a decision");
                         self.curr_request = Some(request);
                     }
                     Err(mpsc::TryRecvError::Empty) => {
@@ -103,6 +116,7 @@ impl App {
         }
 
         // exit the user interface
+        info!("Tearing down user interface");
         tui.exit()?;
 
         Ok(())
