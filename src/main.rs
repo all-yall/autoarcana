@@ -1,5 +1,6 @@
 mod engine;
 mod impls;
+mod client;
 
 use impls::cards::get_card;
 use engine::game::Game;

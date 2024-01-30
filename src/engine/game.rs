@@ -1,8 +1,11 @@
 use std::{collections::BTreeMap, process::exit};
 
-use crate::engine::prelude::*;
+use crate::{engine::prelude::*, client::GameStateSnapshot};
+use crate::client::{Client, PlayerActionRequest, PlayerActionResponse, PlayerAction};
 
 use super::{temp_client::choose_options, util::id::IDFactory};
+
+use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
 #[derive(Clone, Copy)]
 pub enum TurnStep {
@@ -59,6 +62,10 @@ pub struct Game {
 
     perm_ids: IDFactory<PermanentID>,
     ability_ids: IDFactory<AbilityID>,
+
+    // send game updates to clients
+    state_update_sender: BroadcastSender<GameStateSnapshot>,
+    client: Client,
 }
 
 
@@ -76,6 +83,11 @@ impl Game {
 
         let active_player = players[0].id;
 
+        let cap = 1;
+        let (state_update_sender, state_update_receiver) = channel(cap);
+
+        let client = Client::launch(active_player, state_update_receiver).expect("unable to launch client");
+
         Self {
             players,
             active_player,
@@ -88,6 +100,9 @@ impl Game {
 
             perm_ids: IDFactory::new(),
             ability_ids: IDFactory::new(),
+
+            state_update_sender,
+            client,
         }
     }
 
@@ -200,27 +215,21 @@ impl Game {
     pub fn main_phase(&mut self, player_id: PlayerID) {
         self.event(GameEvent::PopulateAbilities);
         loop {
-            match choose_options("What action would you like to take?", &[
-                ("Play Card", 1),
-                ("Activate Ability", 2),
-                ("Pass", 3),
-            ]).first().unwrap()  {
-                    // Playing a card
-                    1 => {
-                        let cards = self.get_player(player_id).hand.cards.iter().enumerate().map(|(idx,card)| (&card.base.name[..], idx)).collect::<Vec<_>>();
-                        let card = match choose_options("What card would you like to play?", &cards[..]).first() {
-                            Some(num) => self.get_player(player_id).hand.cards.remove(*num),
-                            None => continue,
-                        };
-                    },
-                    2 => {
-                            todo!();
-                    },
-                    3 => {
-                        todo!();
-                    },
-                    _=>{}
+            let mut player_actions = vec![PlayerAction::Pass];
+            // the player may play each card in hand
+            let playable_cards = self.get_player(player_id).hand.cards.iter().enumerate().map(|(idx, card)| (idx, card.base.name.clone())).collect::<Vec<_>>();
+
+            // each card in is a potential player action
+            for (idx, card_name) in playable_cards.into_iter() {
+                player_actions.push(PlayerAction::CardPlay(idx, card_name));
+            }
+
+            match self.client.choose_options(player_actions) {
+                PlayerAction::CardPlay(idx, _) => {
+                    self.get_player(player_id).hand.cards.remove(idx);
                 }
+                PlayerAction::Pass => continue,
+            }
         }
     }
 
