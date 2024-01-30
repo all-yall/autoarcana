@@ -6,15 +6,14 @@ use ratatui::{
 
 use crate::client::app::App;
 
-pub fn render(_app: &mut App, f: &mut Frame) {
+pub fn render(app: &mut App, f: &mut Frame) {
     f.render_widget(
         Paragraph::new(format!(
             "
                 Press `Esc`, `Ctrl-C`, or `q` to stop running.\n\
-                Press `j` and `k` to increment and decrement the counter.\n\
-                Counter: {}
+                You are player {:?}
             ",
-            27720,
+            app.player_id
         ))
         .block(
             Block::default()

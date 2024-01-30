@@ -1,5 +1,4 @@
 use std::sync::mpsc;
-use std::time::Duration;
 
 use crate::engine::player::PlayerID;
 
@@ -7,7 +6,7 @@ use super::{GameStateSnapshot, PlayerActionRequest, PlayerActionResponse};
 use super::tui::Tui;
 use super::event::{Event, EventHandler};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use color_eyre::Result;
 use log::info;
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
@@ -23,34 +22,40 @@ pub struct App {
     /// Channel to receive game updates from server
     game_update: BroadcastReceiver<GameStateSnapshot>,
     /// Game state as we last received it.
-    game_state: Option<GameStateSnapshot>,
+    pub game_state: Option<GameStateSnapshot>,
 
-    /// The player ID of our user
-    playerID: PlayerID,
-
-
-    /// Channel to receive requests from the server for the player to decide something
+    /// The player/// Channel to receive requests from the server for the player to decide something
     requests: mpsc::Receiver<PlayerActionRequest>,
     /// Represents the current request we are displaying to the user
-    curr_request: Option<PlayerActionRequest>,
+    pub curr_request: Option<PlayerActionRequest>,
     /// Channel to send response back to the server.
     response: mpsc::Sender<PlayerActionResponse>,
+    /// A possible response to the player action request we have received.
+    pub pending_response: Option<PlayerActionResponse>,
 
+    /// ID of our user
+    pub player_id: PlayerID,
+
+    /// Keys that were pressed down the previous frame
+    key_down: Vec<KeyCode>,
+    
     /// The state of the application.
     mode: Mode,
 }
 
 impl App {
     /// Constructs a new instance of [`App`]
-    pub fn new(playerID: PlayerID, game_update: BroadcastReceiver<GameStateSnapshot>, requests: mpsc::Receiver<PlayerActionRequest>, response: mpsc::Sender<PlayerActionResponse>) -> Self {
+    pub fn new(player_id: PlayerID, game_update: BroadcastReceiver<GameStateSnapshot>, requests: mpsc::Receiver<PlayerActionRequest>, response: mpsc::Sender<PlayerActionResponse>) -> Self {
         Self {
             game_update,
             game_state: None,
-            playerID,
+            player_id,
             requests,
             curr_request: None,
             response,
+            pending_response: None,
             mode: Mode::Running,
+            key_down: vec![],
         }
     }
 
@@ -68,18 +73,23 @@ impl App {
         let mut tui = Tui::new(terminal, events);
         tui.enter()?;
 
-        let timeout = Duration::from_millis(400);
         info!("Entering main loop");
         while self.running() {
             // draw to screen
             tui.draw(self)?;
 
+            self.update();
+            
+            // clear state
+            self.key_down.clear();
+
             // handle player input
-            if let Some(event) = tui.events.next(timeout)? {
+            if let Some(event) = tui.events.try_recv()? {
                 info!("Received user input: {event:?}");
                 match event {
-            //        Event::Tick => self.tick(),
-                    Event::Key(key_event) => self.update(key_event),
+                    Event::Key(key_event) => {
+                        self.key_down.push(key_event.code);
+                    }
                     Event::Mouse(_) => {},
                     Event::Resize(_, _) => {},
                 }
@@ -111,6 +121,15 @@ impl App {
                     Err(e) => return Err(e.into()),
                 }
             }
+            
+            // if we have a response to the server's request, then send it
+            if self.curr_request.is_some() {
+                if let Some(resp) = self.pending_response.clone() {
+                    self.response.send(resp).expect("could not send response to server");
+                    self.pending_response = None;
+                    self.curr_request = None;
+                }
+            }
 
         }
 
@@ -125,22 +144,17 @@ impl App {
         self.mode != Mode::Quitting
     }
 
-    /// Handles the tick event of the terminal
-    pub fn tick(&self) {}
-
     pub fn quit(&mut self) {
         self.mode = Mode::Quitting;
     }
 
-    pub fn update(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.quit(),
-            KeyCode::Char('c') | KeyCode::Char('C') => {
-                if key_event.modifiers == KeyModifiers::CONTROL {
-                    self.quit()
-                }
-            }
-            _ => {},
+    pub fn is_key_down(&mut self, key: KeyCode) -> bool {
+        self.key_down.contains(&key)
+    }
+
+    pub fn update(&mut self) {
+        if self.is_key_down(KeyCode::Esc) {
+            self.quit();
         }
     }
 }

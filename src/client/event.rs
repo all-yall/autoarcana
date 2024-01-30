@@ -1,7 +1,7 @@
 use std::{
-    sync::mpsc::{self, RecvTimeoutError},
+    sync::mpsc::{self, TryRecvError},
     thread,
-    time::{Duration},
+    time::Duration,
 };
 use color_eyre::Result;
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
@@ -70,11 +70,11 @@ impl EventHandler {
         }
     }
 
-    pub fn next(&self, timeout: Duration) -> Result<Option<Event>> {
-        let result = self.receiver.recv_timeout(timeout);
+    pub fn try_recv(&self) -> Result<Option<Event>> {
+        let result = self.receiver.try_recv();
         match result {
             Ok(event) => Ok(Some(event)),
-            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(TryRecvError::Empty) => Ok(None),
             Err(e) => Err(e.into())
         }
     }

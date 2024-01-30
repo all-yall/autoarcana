@@ -24,10 +24,14 @@ pub struct Client {
     response: mpsc::Receiver<PlayerActionResponse>,
 }
 
+/// A `PlayerActionRequest` is a list of available actions
+/// that are legal for the applicable player to take.
+/// The first element is reserved for a default or no-op action.
 pub type PlayerActionRequest = Vec<PlayerAction>;
+/// A `PlayerActionResponse` is among the list of available actions, or is PlayerAction::Pass
 pub type PlayerActionResponse = PlayerAction;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PlayerAction {
     Pass,
     CardPlay(usize, String),
@@ -62,7 +66,7 @@ impl Client {
             Ok(resp) => resp,
             Err(e) => {
                 log::error!("Failed to connect to client with player id {:?}: {}", self.player_id, e);
-                todo!("send a dummy response")
+                PlayerAction::Pass
             }
         }
     }
