@@ -2,7 +2,7 @@ use crate::engine::prelude::*;
 
 use super::util::id::ID;
 
-pub type PermanentID = ID<3>;
+pub type PermanentID = ID<Permanent>;
 
 pub struct Permanent {
     pub name: String,

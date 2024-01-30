@@ -2,7 +2,8 @@ use crate::engine::prelude::*;
 
 use super::util::id::ID;
 
-pub type CardID = ID<2>;
+pub type CardID = ID<Card>;
+
 #[derive(Clone)]
 pub struct Card {
     pub owner: PlayerID,

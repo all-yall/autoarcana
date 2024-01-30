@@ -2,7 +2,7 @@ use crate::engine::prelude::*;
 
 use super::util::id::ID;
 
-pub type PlayerID = ID<4>;
+pub type PlayerID = ID<Player>;
 
 pub struct Player {
     pub id: PlayerID,

@@ -38,7 +38,7 @@ pub enum AbilityClass {
     Linked,
 }
 
-pub type AbilityID = ID<2>;
+pub type AbilityID = ID<Ability>;
 
 #[derive(Clone)]
 pub struct Ability {
