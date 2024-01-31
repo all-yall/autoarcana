@@ -174,7 +174,7 @@ impl Game {
 
         let client = Client::launch(active_player, state_update_receiver).expect("unable to launch client");
 
-        let game = Self {
+        let mut game = Self {
             active_player,
             players: Vec::new(),
             exile_zone: Deck::empty(),
