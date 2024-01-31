@@ -13,11 +13,11 @@ pub fn get_card(name: &str) -> LatentCard {
             vec![],
             vec![ 
                 LatentAbility {
-                    class: AbilityClass::Activated(Cost::empty().with_tap()),
+                    class: AbilityClass::Activated(Cost::empty().with_tap(), AddManaEffect::new(Red)),
                     description: "Add one red mana".into(),
-                    effect: Effect::OneShot(AddManaEffect::new(Red)),
                 },
             ],
+            vec![],
             None, None,
         ),
 
@@ -29,16 +29,15 @@ pub fn get_card(name: &str) -> LatentCard {
             vec![],
             vec![
                 LatentAbility {
-                    class: AbilityClass::Static,
+                    class: AbilityClass::Static(NullEffect::new()),
                     description: "Creatures you control get +1/+1.".into(),
-                    effect: Effect::Continuous(NullEffect::new()),
                 },
                 LatentAbility {
-                    class: AbilityClass::Static,
+                    class: AbilityClass::Triggered(MiraisMana::new()),
                     description: "Whenever you tap a land for mana, add one mana of any type that land produced.".into(),
-                    effect: Effect::Continuous(MiraisMana::new()),
                 }
             ],
+            vec![],
             None, None,
         ),
 
@@ -48,6 +47,7 @@ pub fn get_card(name: &str) -> LatentCard {
             "What he lacks in patience, intelligence, empathy, lucidity, hygiene, ability to follow orders, self-regard, and discernible skills, he makes up for in sheer chaotic violence.".into(),
             vec![Creature],
             vec!["Goblin".into(), "Warrior".into()],
+            vec![],
             vec![],
             Some(2), Some(2),
         ),

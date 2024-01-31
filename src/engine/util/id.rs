@@ -1,6 +1,13 @@
-use std::{iter::Iterator, marker::PhantomData, fmt::Debug, any::type_name};
+use std::{iter::Iterator, marker::PhantomData, fmt::Debug, any::type_name, hash::Hash};
 
 pub struct ID<T> (usize, PhantomData<T>);
+
+
+impl<T> Hash for ID<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
+}
 
 impl<T> Clone for ID<T> {
     fn clone(&self) -> Self {

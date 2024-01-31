@@ -13,8 +13,8 @@ impl Continuous for NullEffect {
         false
     }
 
-    fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> Vec<GameEvent> {
-        vec![event]
+    fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> ListenResult {
+        (Some(event), vec![])
     }
 }
 
@@ -46,8 +46,8 @@ impl MiraisMana {
     pub fn new() -> Box<Self> { Box::new(Self{}) }
 }
 impl Continuous for MiraisMana {
-    fn listen(&mut self, ability_id: AbilityID, event: GameEvent, game: &mut Game) -> Vec<GameEvent> {
-        let mut additional = None;
+    fn listen(&mut self, ability_id: AbilityID, event: GameEvent, game: &mut Game) -> ListenResult {
+        let mut additional = vec![];
         match event {
             GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Ability(ability_id_source)) => {
                 let i_am_recieving_mana = game.get_player_id_from_ability_id(ability_id) == player_id_recv_mana;
@@ -55,11 +55,16 @@ impl Continuous for MiraisMana {
                     |card_type| matches!(card_type, CardType::Land(_))
                 ).is_some();
                 if i_am_recieving_mana && it_is_from_a_land {
-                    additional = Some(GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Ability(ability_id)));
+                    additional.push(
+                        GameEvent::AddMana(
+                            player_id_recv_mana, 
+                            mana_type, 
+                            EventSource::Ability(ability_id)));
                 }
             }
             _ => {}
         }
-        additional.into_iter().chain(Some(event).into_iter()).collect()
+
+        (Some(event), additional)
     }
 }

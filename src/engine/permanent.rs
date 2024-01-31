@@ -14,7 +14,7 @@ pub struct Permanent {
     pub base_toughness: i32,
     pub id: PermanentID,
     pub tapped: bool,
-    pub intrinsic_abilities: Vec<LatentAbility>,
+    pub abilities: Vec<AbilityID>,
 }
 
 impl Permanent {

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, process::exit};
+use std::{collections::{BTreeMap, HashSet}, process::exit};
 
 use crate::{engine::prelude::*, client::GameStateSnapshot};
 use crate::client::{Client, PlayerAction};
@@ -35,6 +35,14 @@ pub enum EventSource {
     GameRule(),
 }
 
+#[derive(Eq, PartialEq)]
+pub enum Zone {
+    Hand,
+    Exile,
+    Battlefield,
+    Graveyard,
+}
+
 pub enum GameEvent {
     StartTurn(PlayerID),
     Step(TurnStep, PlayerID),
@@ -44,11 +52,16 @@ pub enum GameEvent {
 
     AddMana(PlayerID, ManaType, EventSource),
 
-    PopulateAbilities,
-    PopulatePermanentStaticAbilities(PermanentID),
-    PopulatePermanentNonStaticAbilities(PermanentID),
-    RegisterPermanentAbility(PermanentID, LatentAbility),
+    RegisterPermanent(Permanent, Vec<LatentAbility>),
+    EnterTheBattleField(PermanentID),
 }
+
+
+pub enum GameQuery {
+    PermanentAbilities(PermanentID, Vec<AbilityID>),
+    CardAbilities(CardID, Vec<AbilityID>),
+}
+
 
 pub struct Game {
     pub players: Vec<Player>,
@@ -68,34 +81,107 @@ pub struct Game {
     client: Client,
 }
 
+pub struct AbilityOrdering {
+    static_order: Vec<AbilityID>,
+    trigger_order: Vec<AbilityID>,
+    seen_ids: HashSet<AbilityID>,
+    fresh: bool,
+}
+
+impl AbilityOrdering {
+    fn new() -> Self {
+        Self {
+            static_order: vec![],
+            trigger_order: vec![],
+            seen_ids: HashSet::new(),
+            fresh: true
+        }
+    }
+
+    pub fn query(&mut self, game: &Game, query: &mut GameQuery) {
+        self.check_fresh();
+
+        for ability_id in self.static_order.iter() {
+            let ability = game.abilities.get(ability_id).unwrap();
+            ability.query(query, game);
+        }
+    }
+
+    pub fn listen(&mut self, mut event: GameEvent, game: &mut Game) -> ListenResult {
+        self.check_fresh();
+
+        let mut new_events = Vec::new();
+        for ability_id in self.trigger_order.iter() {
+            let mut ability = game.abilities.remove(ability_id).unwrap();
+            let result = ability.listen(event, game); 
+            game.abilities.insert(*ability_id, ability);
+
+            new_events.extend(result.1);
+            if let Some(ev) = result.0 {
+                event = ev;
+            } else {
+                self.fresh = false;
+                return (None, new_events);
+            }
+        }
+        self.fresh = self.fresh && new_events.is_empty();
+
+        (Some(event), new_events)
+    }
+
+    fn check_fresh(&self) {
+        if !self.fresh {
+            eprintln!("Using non-fresh ability ordering!");
+        }
+    }
+
+    fn add_from(&mut self, abilities: Vec<AbilityID>, game: &mut Game) -> bool {
+        self.check_fresh();
+
+        // TODO split into trigger and static functions 
+        // TODO sort by layer here
+
+        for ability_id in abilities.iter() {
+            let seen = !self.seen_ids.insert(*ability_id);
+            if seen {
+                continue
+            }
+
+            let ability = game.get_ability_from_ability_id(*ability_id);
+            match ability.base.class {
+                AbilityClass::Triggered(_)  => self.trigger_order.push(*ability_id),
+                AbilityClass::Static(_) => {
+                    self.static_order.push(*ability_id);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
+        return false;
+    }
+}
 
 impl Game {
     pub fn new(decks: Vec<Vec<LatentCard>>) -> Self {
 
         let mut card_ids = IDFactory::new();
-        let players : Vec<_> = decks.into_iter().zip(IDFactory::new())
-            .map(|(deck, player_id)| {
-                Player::new(
-                deck.into_iter().map(|base| {
-                    Card::new(base, card_ids.get_id(), player_id)
-                }).collect(), player_id)
-        }).collect();
-
-        let active_player = players[0].id;
+        let mut player_ids = IDFactory::new().peekable();
+        let active_player = *player_ids.peek().unwrap();
 
         let cap = 1;
         let (state_update_sender, state_update_receiver) = channel(cap);
 
         let client = Client::launch(active_player, state_update_receiver).expect("unable to launch client");
 
-        Self {
-            players,
+        let game = Self {
             active_player,
+            players: Vec::new(),
             exile_zone: Deck::empty(),
-            battlefield: BTreeMap::new(),
             turn_number: 0,
             game_over: false,
             event_stack: vec![],
+            battlefield: BTreeMap::new(),
             abilities: BTreeMap::new(),
 
             perm_ids: IDFactory::new(),
@@ -103,7 +189,28 @@ impl Game {
 
             state_update_sender,
             client,
-        }
+        };
+
+        let players : Vec<_> = decks
+            .into_iter()
+            .zip(player_ids)
+            .map(|(deck, player_id)| {
+                Player::new(
+                    deck
+                        .into_iter()
+                        .map(|base| {
+                            let card_id = card_ids.get_id();
+                            let card_abilities = base.card_abilities
+                                .iter()
+                                .map(|ability| game.add_ability(ability.clone(), AbilityHolder::Card(card_id)))
+                                .collect();
+                        Card::new(base, card_id, card_abilities, player_id)
+                }).collect(), player_id)
+        }).collect();
+
+        game.players = players;
+
+        game
     }
 
     /**
@@ -148,47 +255,95 @@ impl Game {
                 exit(0);
             }
 
-            PopulateAbilities => {
-                self.battlefield.values().for_each(|perm|
-                    self.event_stack.push(PopulatePermanentStaticAbilities(perm.id))
-                );
-                self.battlefield.values().for_each(|perm|
-                    self.event_stack.push(PopulatePermanentNonStaticAbilities(perm.id))
-                );
-            }
-
-            PopulatePermanentStaticAbilities(perm) => {
-                for latent_ability in self.battlefield.get(&perm).unwrap().intrinsic_abilities.iter() {
-                    if AbilityClass::Static == latent_ability.class {
-                        self.event_stack.push(RegisterPermanentAbility(perm, latent_ability.clone()))     
-                    }
-                }
-            }
-
-            PopulatePermanentNonStaticAbilities(perm) => {
-                for latent_ability in self.battlefield.get(&perm).unwrap().intrinsic_abilities.iter() {
-                    if AbilityClass::Static != latent_ability.class {
-                        self.event_stack.push(RegisterPermanentAbility(perm, latent_ability.clone()))
-                    }
-                }
-            }
-
-            RegisterPermanentAbility(perm, latent_ability) => {
-                let id = self.ability_ids.get_id();
-                let holder = AbilityHolder::Permanent(perm);
-                let ability = Ability {
-                    id,
-                    holder,
-                    latent_ability,
-                };
-
-                self.abilities.insert(ability.id, ability);
+            RegisterPermanent(perm, abilities) => {
+                let id = perm.id;
+                self.battlefield.insert(id, perm);
+                let abilities = abilities.into_iter().map(|ability| {
+                    self.add_ability(ability, AbilityHolder::Permanent(id))
+                }).collect();
+                self.get_perm_from_perm_id(id).abilities = abilities;
+                self.event(EnterTheBattleField(id));
             }
 
             AddMana(player_id, mana_type, _) => {
                 self.get_player(player_id).mana_pool.push(mana_type);
             }
+
+            EnterTheBattleField(_) => {}
         }
+    }
+
+    pub fn build_ability_order(&mut self) -> AbilityOrdering {
+        let mut ordering = AbilityOrdering::new();
+
+        let mut unfinished = false;
+        while unfinished {
+            let abilities = self.all_abilities(&mut ordering);
+            unfinished = ordering.add_from(abilities, self);
+        }
+
+        return ordering;
+    }
+
+    pub fn all_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+        let mut perm = self.all_perm_abilities(order);
+        let card = self.all_card_abilities(order);
+        perm.extend(card);
+        perm
+    }
+
+    pub fn all_perm_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+        self.battlefield
+            .keys()
+            .flat_map(|perm_id| self.perm_abilities(*perm_id, order).into_iter())
+            .collect()
+    }
+
+    pub fn all_card_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+        self.players
+            .iter()
+            .flat_map(|player| player.hand.cards.iter())
+            .flat_map(|card| self.card_abilities(card.id, order).into_iter())
+            .collect()
+    }
+
+    pub fn card_abilities(&self, card_id: CardID, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+        let mut query = GameQuery::CardAbilities(card_id, vec![]);
+        self.query(&mut query, order);
+        if let GameQuery::CardAbilities(_, abilities) = query { return abilities }
+        panic!("query type was changed!");
+    }
+
+    pub fn perm_abilities(&self, perm_id: PermanentID, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+        let mut query = GameQuery::PermanentAbilities(perm_id, vec![]);
+        self.query(&mut query, order);
+        if let GameQuery::PermanentAbilities(_, abilities) = query { return abilities }
+        panic!("query type was changed!");
+    }
+
+
+    pub fn query(&self, query: &mut GameQuery, ability_ordering: &mut AbilityOrdering) {
+        match query {
+            GameQuery::PermanentAbilities(perm_id, ref mut abilities) => {
+                let perm_abilities = self.battlefield
+                    .get(perm_id)
+                    .unwrap()
+                    .abilities
+                    .iter();
+                abilities.extend(perm_abilities);
+            }
+
+            GameQuery::CardAbilities(card_id, ref mut abilities) => {
+                let card_abilities = self.players.iter()
+                    .flat_map(|player| player.hand.cards.iter())
+                    .find(|card| card.id == *card_id)
+                    .unwrap().abilities.iter();
+
+                abilities.extend(card_abilities);
+            }
+        }
+
+        ability_ordering.query(self, query);
     }
 
     pub fn handle_step_event(&mut self, turn_step: TurnStep, player_id: PlayerID) {
@@ -213,7 +368,6 @@ impl Game {
     }
 
     pub fn main_phase(&mut self, player_id: PlayerID) {
-        self.event(GameEvent::PopulateAbilities);
         loop {
             let mut player_actions = vec![PlayerAction::Pass];
             // the player may play each card in hand
@@ -231,6 +385,27 @@ impl Game {
                 PlayerAction::Pass => continue,
             }
         }
+    }
+
+    fn add_ability(&mut self, ability: LatentAbility, holder: AbilityHolder) -> AbilityID {
+        let id = self.ability_ids.get_id();
+        let ability = Ability::new(ability, id, holder);
+        self.abilities.insert(id, ability);
+        id
+    }
+    
+    fn remove_ability(&mut self, id: AbilityID) {
+        self.abilities.remove(&id);
+    }
+
+    fn get_card(&mut self, card_id: CardID) -> &mut Card {
+        self.players
+            .iter_mut()
+            .find_map(|player| 
+                player.hand.cards
+                    .iter_mut()
+                    .find(|card| card.id == card_id)
+            ).unwrap()
     }
 
     pub fn get_player(&mut self, id: PlayerID) -> &mut Player {
@@ -272,6 +447,10 @@ impl Game {
 
     pub fn get_ability_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Ability {
         self.abilities.get_mut(&ability_id).unwrap()
+    }
+
+    pub fn get_perm_from_perm_id(&mut self, perm_id: PermanentID) -> &mut Permanent {
+        self.battlefield.get_mut(&perm_id).unwrap()
     }
 
     pub fn get_perm_id_from_ability_id(&mut self, ability_id: AbilityID) -> PermanentID {
