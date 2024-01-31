@@ -10,7 +10,7 @@ pub fn render(app: &mut App, f: &mut Frame) {
     f.render_widget(
         Paragraph::new(format!(
             "
-                Press `Esc`, `Ctrl-C`, or `q` to stop running.\n\
+                Press `Esc` to stop running.\n\
                 You are player {:?}
             ",
             app.player_id
