@@ -10,7 +10,7 @@ use std::sync::mpsc;
 
 use color_eyre::Result;
 
-use crate::engine::player::PlayerID;
+use crate::engine::{player::PlayerID, prelude::CardID, ability::AbilityID};
 
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 
@@ -34,7 +34,8 @@ pub type PlayerActionResponse = PlayerAction;
 #[derive(Debug, Clone)]
 pub enum PlayerAction {
     Pass,
-    CardPlay(usize, String),
+    CardPlay(AbilityID, String),
+    ActivateAbility(AbilityID, String),
 }
 
 impl Client {

@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, HashSet}, process::exit};
 use crate::{engine::prelude::*, client::GameStateSnapshot};
 use crate::client::{Client, PlayerAction};
 
-use super::{util::id::IDFactory};
+use super::util::id::IDFactory;
 
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
@@ -392,20 +392,44 @@ impl Game {
     }
 
     pub fn main_phase(&mut self, player_id: PlayerID) {
+        let ability_order = self.build_ability_order();
+
         loop {
+            let abilities = self.all_abilities(&mut ability_order);
+
             let mut player_actions = vec![PlayerAction::Pass];
+
             // the player may play each card in hand
             let playable_cards = self.get_player(player_id).hand.cards.iter().enumerate().map(|(idx, card)| (idx, card.base.name.clone())).collect::<Vec<_>>();
 
+            for ability_id in abilities.into_iter() {
+                let ability = self.get_ability_from_ability_id(ability_id);
+                match ability.holder {
+                    AbilityHolder::Card(card_id) =>  {
+                        let player = self.get_player_id_from_card_id(card_id);
+                        if player != player_id {continue}
+                        player_actions.push(
+                            PlayerAction::CardPlay(ability_id, ability.base.description)
+                        );
+                    }
+                    AbilityHolder::Permanent(perm_id) =>  {
+                        let player = self.get_player_id_from_perm_id(perm_id);
+                        if player != player_id {continue}
+                        player_actions.push(
+                            PlayerAction::ActivateAbility(ability_id, ability.base.description)
+                        );
+                    }
+                }
+            }
+
             // each card in is a potential player action
             for (idx, card_name) in playable_cards.into_iter() {
-                player_actions.push(PlayerAction::CardPlay(idx, card_name));
+                todo!();
             }
 
             match self.client.choose_options(player_actions) {
-                PlayerAction::CardPlay(idx, _) => {
-                    self.get_player(player_id).hand.cards.remove(idx);
-                }
+                PlayerAction::CardPlay(idx, _) => { }
+                PlayerAction::ActivateAbility(ability_id, _) => {}
                 PlayerAction::Pass => continue,
             }
         }
@@ -455,8 +479,11 @@ impl Game {
     }
 
     pub fn get_player_id_from_perm_id(&mut self, perm_id: PermanentID) -> PlayerID {
-        let permanent = self.battlefield.get(&perm_id).unwrap();
-         permanent.owner
+        self.get_perm_from_perm_id(perm_id).owner
+    }
+
+    pub fn get_player_id_from_card_id(&mut self, card_id: CardID) -> PlayerID {
+        self.get_card_from_card_id(card_id).owner
     }
 
     pub fn get_ability_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Ability {
