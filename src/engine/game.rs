@@ -32,7 +32,8 @@ pub const DEFAULT_TURN_STRUCTURE: [TurnStep; 8] = [
 
 pub enum EventSource {
     Ability(AbilityID),
-    GameRule(),
+    Player(PlayerID),
+    GameRule,
 }
 
 #[derive(Eq, PartialEq)]
@@ -49,6 +50,9 @@ pub enum GameEvent {
     UntapPerm(PermanentID),
     DrawCard(PlayerID),
     Lose(PlayerID),
+
+    PlaySpell(AbilityID),
+    ActivateAbility(AbilityID),
 
     AddMana(PlayerID, ManaType, EventSource),
 
@@ -73,8 +77,8 @@ pub struct Game {
     pub game_over: bool,
     pub event_stack: Vec<GameEvent>,
 
-    perm_ids: IDFactory<PermanentID>,
-    ability_ids: IDFactory<AbilityID>,
+    pub perm_ids: IDFactory<PermanentID>,
+    pub ability_ids: IDFactory<AbilityID>,
 
     // send game updates to clients
     state_update_sender: BroadcastSender<GameStateSnapshot>,
@@ -227,6 +231,10 @@ impl Game {
         }
     }
 
+    pub fn push_event(&mut self, event: GameEvent) {
+        self.event_stack.push(event);
+    }
+
     pub fn default_event_handler(&mut self, event: GameEvent) {
         use GameEvent::*;
         match event {
@@ -267,6 +275,22 @@ impl Game {
 
             AddMana(player_id, mana_type, _) => {
                 self.get_player(player_id).mana_pool.push(mana_type);
+            }
+
+            PlaySpell(ability_id) => {
+                let mut ability = self.get_ability_from_ability_id(ability_id).clone();
+                match ability.base.class {
+                    AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
+                    _ => panic!("Expected activated ability for PlaySpell event")
+                }
+            }
+
+            ActivateAbility(ability_id) => {
+                let mut ability = self.get_ability_from_ability_id(ability_id).clone();
+                match ability.base.class {
+                    AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
+                    _ => panic!("Expected activated ability for ActivateAbility event")
+                }
             }
 
             EnterTheBattleField(_) => {}
@@ -398,16 +422,6 @@ impl Game {
         self.abilities.remove(&id);
     }
 
-    fn get_card(&mut self, card_id: CardID) -> &mut Card {
-        self.players
-            .iter_mut()
-            .find_map(|player| 
-                player.hand.cards
-                    .iter_mut()
-                    .find(|card| card.id == card_id)
-            ).unwrap()
-    }
-
     pub fn get_player(&mut self, id: PlayerID) -> &mut Player {
         self.players.iter_mut().find(|player| player.id == id).unwrap()
     }
@@ -457,7 +471,7 @@ impl Game {
         let ability = self.get_ability_from_ability_id(ability_id);
         match ability.holder {
             AbilityHolder::Permanent(perm) => perm,
-            _ => panic!("ahhh!")
+            _ => panic!("asserted that ability was held by permanent when it was not.")
         }
     }
 
@@ -466,4 +480,36 @@ impl Game {
         self.battlefield.get_mut(&perm_id).unwrap()
     }
 
+    pub fn get_card_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Card {
+        let card_id = self.get_card_id_from_ability_id(ability_id);
+        self.get_card_from_card_id(card_id)
+    }
+
+    pub fn get_card_id_from_ability_id(&mut self, ability_id: AbilityID) -> CardID {
+        let ability = self.get_ability_from_ability_id(ability_id);
+        match ability.holder {
+             AbilityHolder::Card(card) => card,
+            _ => panic!("asserted that ability was held by card when it was not.")
+        }
+    }
+
+    pub fn take_card_from_card_id(&mut self, card_id: CardID) -> Card {
+        for player in self.players.iter_mut() {
+            let position = player.hand.cards.iter().position(|card| card.id == card_id);
+            if let Some(pos) = position { 
+                return player.hand.cards.remove(pos);
+            }
+        }
+        panic!("card id {:?} is not found in any hand", card_id);
+    }
+    
+    pub fn get_card_from_card_id(&mut self, card_id: CardID) -> &mut Card {
+        self.players
+            .iter_mut()
+            .find_map(|player| 
+                player.hand.cards
+                    .iter_mut()
+                    .find(|card| card.id == card_id)
+            ).unwrap()
+    }
 }

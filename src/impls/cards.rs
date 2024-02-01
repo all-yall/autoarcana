@@ -17,7 +17,7 @@ pub fn get_card(name: &str) -> LatentCard {
                     description: "Add one red mana".into(),
                 },
             ],
-            vec![],
+            vec![CastSpell::ability()],
             None, None,
         ),
 
@@ -37,7 +37,7 @@ pub fn get_card(name: &str) -> LatentCard {
                     description: "Whenever you tap a land for mana, add one mana of any type that land produced.".into(),
                 }
             ],
-            vec![],
+            vec![CastSpell::ability()],
             None, None,
         ),
 
@@ -48,7 +48,7 @@ pub fn get_card(name: &str) -> LatentCard {
             vec![Creature],
             vec!["Goblin".into(), "Warrior".into()],
             vec![],
-            vec![],
+            vec![CastSpell::ability()],
             Some(2), Some(2),
         ),
 

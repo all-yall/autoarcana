@@ -68,3 +68,28 @@ impl Continuous for MiraisMana {
         (Some(event), additional)
     }
 }
+
+#[derive(Clone)]
+pub struct CastSpell {}
+
+impl CastSpell {
+    pub fn new() -> Box<dyn OneShot> {
+        Box::new(Self{})
+    }
+
+    pub fn ability() -> LatentAbility {
+        LatentAbility { 
+            class: AbilityClass::Activated(Cost::empty(), Self::new()), 
+            description: "Play spell".into() 
+        }
+    }
+}
+
+impl OneShot for CastSpell {
+    fn activate(&mut self, ability_id: AbilityID, game: &mut Game) {
+        let card_id = game.get_card_id_from_ability_id(ability_id);
+        let card = game.take_card_from_card_id(card_id);
+        let permanent = Permanent::from_card(&card.base, game.perm_ids.get_id(), card.owner);
+        game.push_event(GameEvent::RegisterPermanent(permanent, card.base.perm_abilities.clone()));
+    }
+}
