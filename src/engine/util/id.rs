@@ -2,8 +2,9 @@ use std::{iter::Iterator, marker::PhantomData, fmt::Debug, any::type_name, hash:
 
 pub struct ID<T> (usize, PhantomData<T>);
 
-unsafe impl<T> Send for ID<T> {
-}
+/// SAFETY: PhantomData holds no data, and it is safe to send usizes between threads
+unsafe impl<T> Send for ID<T> {}
+unsafe impl<T> Sync for ID<T> {}
 
 impl<T> Hash for ID<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

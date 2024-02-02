@@ -2,6 +2,9 @@ mod app;
 mod ui;
 mod event;
 mod tui;
+mod input_handler;
+mod game_state_listener;
+mod player_action_listener;
 
 use app::App;
 use log::info;
@@ -10,7 +13,17 @@ use std::sync::mpsc;
 
 use color_eyre::Result;
 
-use crate::engine::{player::PlayerID, prelude::CardID, ability::AbilityID};
+use crate::{
+    engine::{
+        player::PlayerID,
+        prelude::CardID,
+        ability::AbilityID,
+    },
+    client::{
+        player_action_listener::PlayerActionListener,
+        game_state_listener::GameStateListener
+    }
+};
 
 use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 
@@ -45,9 +58,11 @@ impl Client {
         let (request_sender, request_receiver) = mpsc::channel();
         let (response_sender, response_receiver) = mpsc::channel();
 
+        let game_state_listener = GameStateListener::from(state_update_receiver);
+        let player_asks = PlayerActionListener::from(request_receiver, response_sender);
 
         std::thread::spawn(move || {
-            let mut app = App::new(player_id, state_update_receiver, request_receiver, response_sender);
+            let mut app = App::new(player_id, game_state_listener, player_asks);
             app.run().expect("app failed to run")
         });
 
@@ -61,8 +76,14 @@ impl Client {
     }
 
     pub fn choose_options(&mut self, options: PlayerActionRequest) -> PlayerActionResponse {
-        log::trace!("Requesting player decision from player {:?}, options presented are: {:?}", self.player_id, &options);
-        self.request.send(options).expect("could not send request to client");
+        log::info!("Requesting player decision from player {:?}, options presented are: {:?}", self.player_id, &options);
+        self.request.send(options)
+            .map_err(|e| {
+                log::error!("Could not send request to client: {e}");
+                e
+            })
+            .expect("could not send request to client");
+        log::info!("Blocking on player response");
         match self.response.recv() {
             Ok(resp) => resp,
             Err(e) => {
