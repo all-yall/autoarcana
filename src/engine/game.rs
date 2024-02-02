@@ -392,44 +392,37 @@ impl Game {
     }
 
     pub fn main_phase(&mut self, player_id: PlayerID) {
-        let ability_order = self.build_ability_order();
+        let mut ability_order = self.build_ability_order();
 
         loop {
             let abilities = self.all_abilities(&mut ability_order);
 
             let mut player_actions = vec![PlayerAction::Pass];
 
-            // the player may play each card in hand
-            let playable_cards = self.get_player(player_id).hand.cards.iter().enumerate().map(|(idx, card)| (idx, card.base.name.clone())).collect::<Vec<_>>();
-
+            // collect all abilities, then sort into type and if the player controls the ability
             for ability_id in abilities.into_iter() {
-                let ability = self.get_ability_from_ability_id(ability_id);
-                match ability.holder {
+                let ability_holder = self.get_ability_from_ability_id(ability_id).holder.clone();
+                match ability_holder {
                     AbilityHolder::Card(card_id) =>  {
                         let player = self.get_player_id_from_card_id(card_id);
                         if player != player_id {continue}
                         player_actions.push(
-                            PlayerAction::CardPlay(ability_id, ability.base.description)
+                            PlayerAction::CardPlay(ability_id, self.get_ability_from_ability_id(ability_id).base.description.clone())
                         );
                     }
                     AbilityHolder::Permanent(perm_id) =>  {
                         let player = self.get_player_id_from_perm_id(perm_id);
                         if player != player_id {continue}
                         player_actions.push(
-                            PlayerAction::ActivateAbility(ability_id, ability.base.description)
+                            PlayerAction::ActivateAbility(ability_id, self.get_ability_from_ability_id(ability_id).base.description.clone())
                         );
                     }
                 }
             }
 
-            // each card in is a potential player action
-            for (idx, card_name) in playable_cards.into_iter() {
-                todo!();
-            }
-
             match self.client.choose_options(player_actions) {
-                PlayerAction::CardPlay(idx, _) => { }
-                PlayerAction::ActivateAbility(ability_id, _) => {}
+                PlayerAction::CardPlay(idx, _) => todo!(),
+                PlayerAction::ActivateAbility(ability_id, _) => todo!(),
                 PlayerAction::Pass => continue,
             }
         }
