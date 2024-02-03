@@ -11,27 +11,11 @@ pub enum AbilityHolder {
 }
 
 
-/*
-* Activated
-*   Have a cost and an effect
-*
-* Triggered
-*   Listen and add event on event
-*
-* Static
-*   Listen and replace/delete/modify events.
-*   Change characteristics of other cards
-*
-* Mana
-*   No Target and could add mana and not loyalty ability
-*
-* Loyalty
-*   Had by planeswalkers
-*/
 #[derive(Clone)]
 pub enum AbilityClass {
-    Static(Box<dyn Continuous>),
-    Triggered(Box<dyn Continuous>),
+    Static(Box<dyn QueryModifier>),
+    Triggered(Box<dyn EventModifier>),
+    Replacement(Box<dyn EventModifier>),
     Activated(Cost, Box<dyn OneShot>),
 }
 
@@ -62,6 +46,7 @@ impl Ability {
     pub fn listen(&mut self, event: GameEvent, game: &mut Game) -> ListenResult {
         match self.base.class {
             AbilityClass::Triggered(ref mut a) => a.listen(self.id, event, game),
+            AbilityClass::Triggered(ref mut a) => a.listen(self.id, event, game),
             _ => (Some(event), vec![])
         }
     }
@@ -80,20 +65,18 @@ pub struct LatentAbility {
     pub description: String,
 }
 
-pub trait Continuous: DynClone {
-    fn done(&mut self) -> bool { false }
-
-    fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> ListenResult {
-        (Some(event), vec![])
-    }
-
-    fn query(&self, ability: AbilityID, query: &mut GameQuery, game: &Game) {
-    }
+pub trait QueryModifier: DynClone {
+    fn query(&self, ability: AbilityID, query: &mut GameQuery, game: &Game);
 }
 
-dyn_clone::clone_trait_object!(Continuous);
+pub trait EventModifier: DynClone {
+    fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> ListenResult;
+}
 
 pub trait OneShot: DynClone {
     fn activate(&mut self, ability: AbilityID, game: &mut Game);
 }
+
+dyn_clone::clone_trait_object!(EventModifier);
+dyn_clone::clone_trait_object!(QueryModifier);
 dyn_clone::clone_trait_object!(OneShot);

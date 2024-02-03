@@ -2,8 +2,13 @@ use std::{collections::{BTreeMap, HashSet}, process::exit};
 
 use crate::{engine::prelude::*, client::GameStateSnapshot};
 use crate::client::{Client, PlayerAction};
+use log::warn;
 
-use super::util::id::IDFactory;
+use super::util::id::{
+    ID,
+    IDFactory,
+    IDMapper,
+};
 
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
@@ -44,6 +49,9 @@ pub enum Zone {
     Graveyard,
 }
 
+/// This represents any game modification event
+/// that is relevant to other abilities, and could
+/// potentially be modified by them.
 pub enum GameEvent {
     StartTurn(PlayerID),
     Step(TurnStep, PlayerID),
@@ -61,12 +69,19 @@ pub enum GameEvent {
 }
 
 
+/// This represents any read of game state that could
+/// be modified by other abilities. Mostly continuous
+/// effects are what should be considered.
 pub enum GameQuery {
     PermanentAbilities(PermanentID, Vec<AbilityID>),
     CardAbilities(CardID, Vec<AbilityID>),
 }
 
 
+/// The Game object contains all game information
+/// and additionally acts as a store for all game
+/// objects so that they are easily found and rusts
+/// borrow checker doesn't get too mad.
 pub struct Game {
     pub players: Vec<Player>,
     pub active_player: PlayerID,
@@ -85,10 +100,14 @@ pub struct Game {
     client: Client,
 }
 
+/// This represents the ordering that abilities
+/// should be applied. This includes the Layer system
+/// and the ordering of replacement effects before trigger
+/// effects.
 pub struct AbilityOrdering {
     static_order: Vec<AbilityID>,
+    replacement_order: Vec<AbilityID>,
     trigger_order: Vec<AbilityID>,
-    seen_ids: HashSet<AbilityID>,
     fresh: bool,
 }
 
@@ -96,12 +115,46 @@ impl AbilityOrdering {
     fn new() -> Self {
         Self {
             static_order: vec![],
+            replacement_order: vec![],
             trigger_order: vec![],
-            seen_ids: HashSet::new(),
             fresh: true
         }
     }
 
+    fn build_from(game: &mut Game) -> Self {
+        let mut order = Self::new();
+        let mut seen_ids = HashSet::new();
+        let mut done = true;
+
+        while !done {
+            let abilities = game.all_abilities(&mut order);
+
+            for ability_id in abilities.iter() {
+                let seen = !seen_ids.insert(*ability_id);
+                if seen {
+                    continue
+                }
+
+                let ability = game.get(*ability_id);
+                match ability.base.class {
+                    AbilityClass::Replacement(_)  => order.replacement_order.push(*ability_id),
+                    AbilityClass::Triggered(_)  => order.trigger_order.push(*ability_id),
+                    AbilityClass::Static(_) => {
+                        order.static_order.push(*ability_id);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            done = true;
+        }
+
+        order
+    }
+
+    /// Puts query through the ability ordering to apply all 
+    /// continuous effects 
     pub fn query(&mut self, game: &Game, query: &mut GameQuery) {
         self.check_fresh();
 
@@ -111,11 +164,13 @@ impl AbilityOrdering {
         }
     }
 
+    /// Puts event through the ability ordering to apply all trigger
+    /// and replacement effects
     pub fn listen(&mut self, mut event: GameEvent, game: &mut Game) -> ListenResult {
         self.check_fresh();
 
         let mut new_events = Vec::new();
-        for ability_id in self.trigger_order.iter() {
+        for ability_id in self.replacement_order.iter().chain(self.trigger_order.iter()) {
             let mut ability = game.abilities.remove(ability_id).unwrap();
             let result = ability.listen(event, game); 
             game.abilities.insert(*ability_id, ability);
@@ -133,34 +188,20 @@ impl AbilityOrdering {
         (Some(event), new_events)
     }
 
+    /// A sanity checking function; In the event that the abilityOrder 
+    /// generates new events, then the current abilityOrdering should
+    /// no longer be trusted, so a warning is printed
     fn check_fresh(&self) {
         if !self.fresh {
-            eprintln!("Using non-fresh ability ordering!");
+            warn!("Using non-fresh ability ordering, could produce incorrect results.");
         }
     }
 
     fn add_from(&mut self, abilities: Vec<AbilityID>, game: &mut Game) -> bool {
         self.check_fresh();
 
-        // TODO split into trigger and static functions 
         // TODO sort by layer here
 
-        for ability_id in abilities.iter() {
-            let seen = !self.seen_ids.insert(*ability_id);
-            if seen {
-                continue
-            }
-
-            let ability = game.get_ability_from_ability_id(*ability_id);
-            match ability.base.class {
-                AbilityClass::Triggered(_)  => self.trigger_order.push(*ability_id),
-                AbilityClass::Static(_) => {
-                    self.static_order.push(*ability_id);
-                    return true;
-                }
-                _ => {}
-            }
-        }
 
         return false;
     }
@@ -217,20 +258,8 @@ impl Game {
         game
     }
 
-    /**
-    * Push the given event onto the event stack and resolve it and all its
-    * consequences. This will not resolve the entire event stack. The event
-    * stack should hold the same value after as before.
-    */
-    pub fn event(&mut self, event: GameEvent) {
-        let starting_size = self.event_stack.len();
-        self.event_stack.push(event);
-        while self.event_stack.len() > starting_size {
-            let event = self.event_stack.pop().unwrap();
-            self.default_event_handler(event);
-        }
-    }
-
+    /// Queues an event to be processed by the game. Keep in mind that 
+    /// events are processed in a Last-in First-out order.
     pub fn push_event(&mut self, event: GameEvent) {
         self.event_stack.push(event);
     }
@@ -270,7 +299,7 @@ impl Game {
                     self.add_ability(ability, AbilityHolder::Permanent(id))
                 }).collect();
                 self.get_perm_from_perm_id(id).abilities = abilities;
-                self.event(EnterTheBattleField(id));
+                self.push_event(EnterTheBattleField(id));
             }
 
             AddMana(player_id, mana_type, _) => {
@@ -278,7 +307,7 @@ impl Game {
             }
 
             PlaySpell(ability_id) => {
-                let mut ability = self.get_ability_from_ability_id(ability_id).clone();
+                let mut ability = self.get(ability_id).clone();
                 match ability.base.class {
                     AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
                     _ => panic!("Expected activated ability for PlaySpell event")
@@ -286,7 +315,7 @@ impl Game {
             }
 
             ActivateAbility(ability_id) => {
-                let mut ability = self.get_ability_from_ability_id(ability_id).clone();
+                let mut ability = self.get(ability_id).clone();
                 match ability.base.class {
                     AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
                     _ => panic!("Expected activated ability for ActivateAbility event")
@@ -401,20 +430,20 @@ impl Game {
 
             // collect all abilities, then sort into type and if the player controls the ability
             for ability_id in abilities.into_iter() {
-                let ability_holder = self.get_ability_from_ability_id(ability_id).holder.clone();
+                let ability_holder = self.get(ability_id).holder.clone();
                 match ability_holder {
                     AbilityHolder::Card(card_id) =>  {
                         let player = self.get_player_id_from_card_id(card_id);
                         if player != player_id {continue}
                         player_actions.push(
-                            PlayerAction::CardPlay(ability_id, self.get_ability_from_ability_id(ability_id).base.description.clone())
+                            PlayerAction::CardPlay(ability_id, self.get(ability_id).base.description.clone())
                         );
                     }
                     AbilityHolder::Permanent(perm_id) =>  {
                         let player = self.get_player_id_from_perm_id(perm_id);
                         if player != player_id {continue}
                         player_actions.push(
-                            PlayerAction::ActivateAbility(ability_id, self.get_ability_from_ability_id(ability_id).base.description.clone())
+                            PlayerAction::ActivateAbility(ability_id, self.get(ability_id).base.description.clone())
                         );
                     }
                 }
@@ -448,7 +477,11 @@ impl Game {
     }
 
     pub fn run(&mut self) {
-        self.event(GameEvent::StartTurn(self.active_player));
+        self.push_event(GameEvent::StartTurn(self.active_player));
+        loop {
+            let event = self.event_stack.pop().unwrap();
+            self.default_event_handler(event);
+        }
     }
 
     pub fn next_player(&mut self) {
@@ -476,11 +509,7 @@ impl Game {
     }
 
     pub fn get_player_id_from_card_id(&mut self, card_id: CardID) -> PlayerID {
-        self.get_card_from_card_id(card_id).owner
-    }
-
-    pub fn get_ability_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Ability {
-        self.abilities.get_mut(&ability_id).unwrap()
+        self.get(card_id).owner
     }
 
     pub fn get_perm_from_perm_id(&mut self, perm_id: PermanentID) -> &mut Permanent {
@@ -488,7 +517,7 @@ impl Game {
     }
 
     pub fn get_perm_id_from_ability_id(&mut self, ability_id: AbilityID) -> PermanentID {
-        let ability = self.get_ability_from_ability_id(ability_id);
+        let ability = self.get(ability_id);
         match ability.holder {
             AbilityHolder::Permanent(perm) => perm,
             _ => panic!("asserted that ability was held by permanent when it was not.")
@@ -502,11 +531,11 @@ impl Game {
 
     pub fn get_card_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Card {
         let card_id = self.get_card_id_from_ability_id(ability_id);
-        self.get_card_from_card_id(card_id)
+        self.get_mut(card_id)
     }
 
     pub fn get_card_id_from_ability_id(&mut self, ability_id: AbilityID) -> CardID {
-        let ability = self.get_ability_from_ability_id(ability_id);
+        let ability = self.get(ability_id);
         match ability.holder {
              AbilityHolder::Card(card) => card,
             _ => panic!("asserted that ability was held by card when it was not.")
@@ -522,14 +551,41 @@ impl Game {
         }
         panic!("card id {:?} is not found in any hand", card_id);
     }
-    
-    pub fn get_card_from_card_id(&mut self, card_id: CardID) -> &mut Card {
+}
+
+impl IDMapper<Ability> for Game {
+    fn get(&self, id: ID<Ability>) -> &Ability { self.abilities.get(&id).unwrap() }
+    fn get_mut(&mut self, id: ID<Ability>) -> &mut Ability { self.abilities.get_mut(&id).unwrap() }
+}
+
+impl IDMapper<Player> for Game {
+    fn get(&self, id: ID<Player>) -> &Player { self.players.iter().find(|player| player.id == id).unwrap() }
+    fn get_mut(&mut self, id: ID<Player>) -> &mut Player { self.players.iter_mut().find(|player| player.id == id).unwrap() }
+}
+
+impl IDMapper<Card> for Game {
+    fn get(&self, id: ID<Card>) -> &Card { 
+        self.players
+            .iter()
+            .find_map(|player| 
+                player.hand.cards
+                    .iter()
+                    .find(|card| card.id == id)
+            ).unwrap()
+    }
+
+    fn get_mut(&mut self, id: ID<Card>) -> &mut Card { 
         self.players
             .iter_mut()
             .find_map(|player| 
                 player.hand.cards
                     .iter_mut()
-                    .find(|card| card.id == card_id)
+                    .find(|card| card.id == id)
             ).unwrap()
     }
+}
+
+impl IDMapper<Permanent> for Game {
+    fn get(&self, id: ID<Permanent>) -> &Permanent { self.battlefield.get(&id).unwrap() }
+    fn get_mut(&mut self, id: ID<Permanent>) -> &mut Permanent { self.battlefield.get_mut(&id).unwrap() }
 }

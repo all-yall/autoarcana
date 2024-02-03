@@ -6,6 +6,11 @@ pub struct ID<T> (usize, PhantomData<T>);
 unsafe impl<T> Send for ID<T> {}
 unsafe impl<T> Sync for ID<T> {}
 
+pub trait IDMapper<T> {
+    fn get(&self, id: ID<T>) -> &T;
+    fn get_mut(&mut self, id: ID<T>) -> &mut T;
+}
+
 impl<T> Hash for ID<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state)

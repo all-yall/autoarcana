@@ -8,13 +8,14 @@ impl NullEffect {
     }
 }
 
-impl Continuous for NullEffect {
-    fn done(&mut self) -> bool {
-        false
-    }
-
+impl EventModifier for NullEffect {
     fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> ListenResult {
         (Some(event), vec![])
+    }
+}
+
+impl QueryModifier for NullEffect {
+    fn query(&self, ability: AbilityID, query: &mut GameQuery, game: &Game) {
     }
 }
 
@@ -36,7 +37,7 @@ impl AddManaEffect {
 impl OneShot for AddManaEffect {
     fn activate(&mut self, ability_id: AbilityID, game: &mut Game) {
         let player_id = game.get_player_id_from_ability_id(ability_id);
-        game.event(GameEvent::AddMana(player_id, self.mana_type, EventSource::Ability(ability_id)))
+        game.push_event(GameEvent::AddMana(player_id, self.mana_type, EventSource::Ability(ability_id)))
     }
 }
 
@@ -45,7 +46,7 @@ pub struct MiraisMana {}
 impl MiraisMana {
     pub fn new() -> Box<Self> { Box::new(Self{}) }
 }
-impl Continuous for MiraisMana {
+impl EventModifier for MiraisMana {
     fn listen(&mut self, ability_id: AbilityID, event: GameEvent, game: &mut Game) -> ListenResult {
         let mut additional = vec![];
         match event {
