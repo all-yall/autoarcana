@@ -1,34 +1,33 @@
 use super::prelude::*;
 
-struct GameStateSnapshot {
-    opponent_perms: Vec<PermanentSnapshot>,
-    perms: Vec<PermanentSnapshot>,
-    hand: Vec<CardSnapshot>,
-    graveyard: Vec<CardSnapshot>,
+pub struct GameStateSnapshot {
+    pub opponent_perms: Vec<PermanentSnapshot>,
+    pub perms: Vec<PermanentSnapshot>,
+    pub hand: Vec<CardSnapshot>,
+    pub graveyard: Vec<CardSnapshot>,
 }
 
-struct PermanentSnapshot {
-    permanent: Attributes,
-    state: State,
-    id: PermanentID,
+pub struct PermanentSnapshot {
+    pub permanent: Attributes,
+    pub state: State,
+    pub id: PermanentID,
 }
 
-struct CardSnapshot {
-    card: Attributes,
-    id: CardID,
+pub struct CardSnapshot {
+    pub card: Attributes,
+    pub id: CardID,
 }
 
-struct State {
-    is_tapped: bool,
+pub struct State {
+    pub is_tapped: bool,
 }
 
-struct Attributes {
-    name: String,
-    card_type: Vec<CardType>,
-    card_subtypes: Vec<String>,
-    cost: Option<ManaCost>,
-    abilities: Vec<String>,
-    flavor: String,
-    power_toughness: Option<(i32, i32)>,
-
+pub struct Attributes {
+    pub name: String,
+    pub card_type: Vec<CardType>,
+    pub card_subtypes: Vec<String>,
+    pub cost: Option<ManaCost>,
+    pub abilities: Vec<String>,
+    pub flavor: String,
+    pub power_toughness: Option<(i32, i32)>,
 }

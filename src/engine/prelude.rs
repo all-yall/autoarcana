@@ -6,4 +6,5 @@ pub use crate::engine::{
     permanent::*,
     game::*,
     deck::*,
+    game_state_snapshot::*,
 };
