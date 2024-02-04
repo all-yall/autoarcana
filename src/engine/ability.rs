@@ -45,7 +45,7 @@ impl Ability {
 
     pub fn listen(&mut self, event: GameEvent, game: &mut Game) -> ListenResult {
         match self.base.class {
-            AbilityClass::Triggered(ref mut a) => a.listen(self.id, event, game),
+            AbilityClass::Replacement(ref mut a) => a.listen(self.id, event, game),
             AbilityClass::Triggered(ref mut a) => a.listen(self.id, event, game),
             _ => (Some(event), vec![])
         }

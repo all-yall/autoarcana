@@ -9,7 +9,8 @@ pub struct Permanent {
     pub flavor: String,
     pub types: Vec<CardType>,
     pub subtypes: Vec<String>,
-    pub card: Option<Card>,
+    pub card: Option<CardID>,
+    pub is_token: bool,
     pub owner: PlayerID,
     pub base_power: i32,
     pub base_toughness: i32,
@@ -24,16 +25,17 @@ impl Permanent {
         self.tapped = false;
     }
 
-    pub fn from_card(card: &LatentCard, id: PermanentID, owner: PlayerID) -> Self {
+    pub fn from_card(card: &Card, id: PermanentID, owner: PlayerID) -> Self {
         Self {
-            name: card.name.clone(),
-            flavor: card.flavor.clone(),
-            types: card.card_types.clone(),
-            subtypes: card.card_subtypes.clone(),
-            card: None,
+            name: card.base.name.clone(),
+            flavor: card.base.flavor.clone(),
+            types: card.base.card_types.clone(),
+            subtypes: card.base.card_subtypes.clone(),
+            card: Some(card.id),
+            is_token: false,
             owner,
-            base_power: card.power.unwrap(),
-            base_toughness: card.toughness.unwrap(),
+            base_power: card.base.power.unwrap(),
+            base_toughness: card.base.toughness.unwrap(),
             id,
             abilities: vec![],
             tapped: false,

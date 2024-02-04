@@ -41,14 +41,6 @@ pub enum EventSource {
     GameRule,
 }
 
-#[derive(Eq, PartialEq)]
-pub enum Zone {
-    Hand,
-    Exile,
-    Battlefield,
-    Graveyard,
-}
-
 /// This represents any game modification event
 /// that is relevant to other abilities, and could
 /// potentially be modified by them.
@@ -91,6 +83,7 @@ pub struct Game {
     pub turn_number: usize,
     pub game_over: bool,
     pub event_stack: Vec<GameEvent>,
+    pub cards: CardStore,
 
     pub perm_ids: IDFactory<PermanentID>,
     pub ability_ids: IDFactory<AbilityID>,
@@ -211,8 +204,10 @@ impl Game {
     pub fn new(decks: Vec<Vec<LatentCard>>) -> Self {
 
         let mut card_ids = IDFactory::new();
-        let mut player_ids = IDFactory::new().peekable();
-        let active_player = *player_ids.peek().unwrap();
+        let mut player_ids = IDFactory::new()
+            .take(decks.len())
+            .collect::<Vec<_>>();
+        let active_player = *player_ids.first().expect("Need at least on player in the game");
 
         let cap = 1;
         let (state_update_sender, state_update_receiver) = channel(cap);
@@ -228,6 +223,7 @@ impl Game {
             event_stack: vec![],
             battlefield: BTreeMap::new(),
             abilities: BTreeMap::new(),
+            cards: CardStore::new(&player_ids),
 
             perm_ids: IDFactory::new(),
             ability_ids: IDFactory::new(),
@@ -240,17 +236,16 @@ impl Game {
             .into_iter()
             .zip(player_ids)
             .map(|(deck, player_id)| {
-                Player::new(
-                    deck
-                        .into_iter()
-                        .map(|base| {
-                            let card_id = card_ids.get_id();
-                            let card_abilities = base.card_abilities
-                                .iter()
-                                .map(|ability| game.add_ability(ability.clone(), AbilityHolder::Card(card_id)))
-                                .collect();
-                        Card::new(base, card_id, card_abilities, player_id)
-                }).collect(), player_id)
+                deck.into_iter().for_each(|base| {
+                        let card_id = card_ids.get_id();
+                        let card_abilities = base.card_abilities
+                            .iter()
+                            .map(|ability| game.add_ability(ability.clone(), AbilityHolder::Card(card_id)))
+                            .collect();
+                        let card = Card::new(base, card_id, card_abilities, player_id);
+                        game.cards.put_card(card, Zone::Deck(player_id));
+                    });
+                Player::new(player_id)
         }).collect();
 
         game.players = players;
@@ -275,10 +270,9 @@ impl Game {
             Step(step, player_id) => self.handle_step_event(step, player_id), 
 
             DrawCard(player_id) => {
-                let player = self.get_player(player_id);
-                if let Some(card) = player.deck.pop() {
-                    player.hand.add(card);
-                } else {
+                let drawn_card = self.cards.draw(player_id);
+                // Couldn't draw a card, lose the game.
+                if drawn_card.is_none() { 
                     self.event_stack.push(Lose(player_id));
                 }
             }
@@ -355,7 +349,7 @@ impl Game {
     pub fn all_card_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
         self.players
             .iter()
-            .flat_map(|player| player.hand.cards.iter())
+            .flat_map(|player| self.cards.hand(player.id).into_iter())
             .flat_map(|card| self.card_abilities(card.id, order).into_iter())
             .collect()
     }
@@ -387,11 +381,7 @@ impl Game {
             }
 
             GameQuery::CardAbilities(card_id, ref mut abilities) => {
-                let card_abilities = self.players.iter()
-                    .flat_map(|player| player.hand.cards.iter())
-                    .find(|card| card.id == *card_id)
-                    .unwrap().abilities.iter();
-
+                let card_abilities = self.cards.get_card(*card_id).abilities.iter();
                 abilities.extend(card_abilities);
             }
         }
@@ -541,16 +531,6 @@ impl Game {
             _ => panic!("asserted that ability was held by card when it was not.")
         }
     }
-
-    pub fn take_card_from_card_id(&mut self, card_id: CardID) -> Card {
-        for player in self.players.iter_mut() {
-            let position = player.hand.cards.iter().position(|card| card.id == card_id);
-            if let Some(pos) = position { 
-                return player.hand.cards.remove(pos);
-            }
-        }
-        panic!("card id {:?} is not found in any hand", card_id);
-    }
 }
 
 impl IDMapper<Ability> for Game {
@@ -565,23 +545,11 @@ impl IDMapper<Player> for Game {
 
 impl IDMapper<Card> for Game {
     fn get(&self, id: ID<Card>) -> &Card { 
-        self.players
-            .iter()
-            .find_map(|player| 
-                player.hand.cards
-                    .iter()
-                    .find(|card| card.id == id)
-            ).unwrap()
+        self.cards.get_card(id)
     }
 
     fn get_mut(&mut self, id: ID<Card>) -> &mut Card { 
-        self.players
-            .iter_mut()
-            .find_map(|player| 
-                player.hand.cards
-                    .iter_mut()
-                    .find(|card| card.id == id)
-            ).unwrap()
+        self.cards.get_card_mut(id)
     }
 }
 

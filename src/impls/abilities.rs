@@ -88,9 +88,10 @@ impl CastSpell {
 
 impl OneShot for CastSpell {
     fn activate(&mut self, ability_id: AbilityID, game: &mut Game) {
+        let new_perm_id = game.perm_ids.get_id();
         let card_id = game.get_card_id_from_ability_id(ability_id);
-        let card = game.take_card_from_card_id(card_id);
-        let permanent = Permanent::from_card(&card.base, game.perm_ids.get_id(), card.owner);
+        let card = game.get(card_id);
+        let permanent = Permanent::from_card(card, new_perm_id, card.owner);
         game.push_event(GameEvent::RegisterPermanent(permanent, card.base.perm_abilities.clone()));
     }
 }
