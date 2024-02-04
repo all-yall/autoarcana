@@ -9,5 +9,6 @@ pub mod ability;
 pub mod permanent;
 pub mod card_store;
 pub mod game_state_snapshot;
+pub mod type_line;
 
 pub mod prelude;

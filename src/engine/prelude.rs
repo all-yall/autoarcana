@@ -9,4 +9,5 @@ pub use crate::engine::{
     game_state_snapshot::*,
     card_store::*,
     util::id::*,
+    type_line::*,
 };

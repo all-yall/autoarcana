@@ -23,8 +23,7 @@ pub struct LatentCard {
     pub cost: ManaCost,
     pub name: String,
     pub flavor: String,
-    pub card_types: Vec<CardType>,
-    pub card_subtypes: Vec<String>,
+    pub type_line: TypeLine,
     pub perm_abilities: Vec<LatentAbility>,
     pub card_abilities: Vec<LatentAbility>,
     pub power: Option<i32>,
@@ -32,13 +31,12 @@ pub struct LatentCard {
 }
 
 impl LatentCard {
-    pub fn new(name: String, cost: ManaCost,  flavor: String, card_types: Vec<CardType>, card_subtypes: Vec<String>, perm_abilities: Vec<LatentAbility>, card_abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
+    pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
         Self {
             name,
             cost,
             flavor,
-            card_types,
-            card_subtypes,
+            type_line,
             perm_abilities,
             card_abilities,
             power,
@@ -47,17 +45,3 @@ impl LatentCard {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq)]
-pub enum CardType {
-    Basic,
-    Land(ManaType),
-    Creature,
-    Artifact,
-    Sorcery,
-    Instant,
-    Enchantment,
-
-    Legendary,
-    Goblin,
-    Warrior,
-}

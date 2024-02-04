@@ -52,9 +52,7 @@ impl EventModifier for MiraisMana {
         match event {
             GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Ability(ability_id_source)) => {
                 let i_am_recieving_mana = game.get_player_id_from_ability_id(ability_id) == player_id_recv_mana;
-                let it_is_from_a_land = game.get_perm_from_ability_id(ability_id_source).types.iter().find(
-                    |card_type| matches!(card_type, CardType::Land(_))
-                ).is_some();
+                let it_is_from_a_land = game.get_perm_from_ability_id(ability_id_source).type_line.is(CardType::Land);
                 if i_am_recieving_mana && it_is_from_a_land {
                     additional.push(
                         GameEvent::AddMana(
