@@ -24,8 +24,7 @@ pub struct State {
 
 pub struct Attributes {
     pub name: String,
-    pub card_type: Vec<CardType>,
-    pub card_subtypes: Vec<String>,
+    pub type_line: TypeLine,
     pub cost: Option<ManaCost>,
     pub abilities: Vec<String>,
     pub flavor: String,

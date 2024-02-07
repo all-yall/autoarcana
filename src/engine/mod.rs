@@ -1,5 +1,4 @@
-mod util;
-
+pub mod util;
 pub mod game;
 pub mod player;
 pub mod card;
