@@ -1,6 +1,8 @@
+use std::fmt::Debug;
+
 use super::prelude::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum TurnStep {
     Untap,
     Upkeep,
@@ -23,6 +25,7 @@ pub const DEFAULT_TURN_STRUCTURE: [TurnStep; 8] = [
     TurnStep::CleanUp,
 ];
 
+#[derive(Debug)]
 pub enum EventSource {
     Permanent(PermanentID),
     Player(PlayerID),
@@ -32,6 +35,7 @@ pub enum EventSource {
 /// This represents any game modification event
 /// that is relevant to other abilities, and could
 /// potentially be modified by them.
+#[derive(Debug)]
 pub enum GameEvent {
     StartTurn(PlayerID),
     Step(TurnStep, PlayerID),
@@ -48,10 +52,10 @@ pub enum GameEvent {
     EnterTheBattleField(PermanentID),
 }
 
-
 /// This represents any read of game state that could
 /// be modified by other abilities. Mostly continuous
 /// effects are what should be considered.
+#[derive(Debug)]
 pub enum GameQuery {
     PermanentAbilities(PermanentID, Vec<AbilityID>),
     CardAbilities(CardID, Vec<CardPlayID>),

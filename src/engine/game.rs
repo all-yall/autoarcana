@@ -9,6 +9,7 @@ use super::util::id::{
     IDMapper,
 };
 
+use log::info;
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
 
@@ -261,6 +262,9 @@ impl Game {
     }
 
     pub fn main_phase(&mut self, player_id: PlayerID, ability_order: &AbilityOrdering) {
+        // We are in the midst of applying a game event, so it thinks it isn't fresh, but since
+        // nothing has happened yet, it still is. This merely helps clean up the logs
+        ability_order.set_fresh();
         loop {
             let mut player_actions = vec![PlayerAction::Pass];
 
@@ -318,19 +322,26 @@ impl Game {
     }
 
     pub fn run(&mut self) {
+        info!("gameloop: Starting game loop");
         self.push_event(GameEvent::StartTurn(self.active_player));
         let mut ability_order =  AbilityOrdering::build_from(self);
 
         loop {
             let event = self.event_stack.pop().unwrap();
+            info!("gameloop: Processing event {:?}", event);
             let (maybe_original_event, new_events) = ability_order.listen(event, self);
+            info!("gameloop: In response, {} events were added", new_events.len());
             self.event_stack.extend(new_events.into_iter());
 
             // The event wasn't canceled, so we are now applying it.
             if let Some(event) = maybe_original_event {
+                info!("gameloop: Event wasn't consumed, though may have been modified. It is now: {:?}", event);
                 self.default_event_handler(event, &ability_order);
                 // The game state has changed, so the ability order should be updated.
+                info!("gameloop: Rebuilding ability order");
                 ability_order = AbilityOrdering::build_from(self);
+            } else {
+                info!("gameloop: Event was consumed.")
             }
         }
     }

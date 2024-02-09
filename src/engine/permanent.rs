@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::engine::prelude::*;
 
 use super::util::id::ID;
@@ -41,4 +43,10 @@ impl Permanent {
         }
     }
 
+}
+
+impl Debug for Permanent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+       format!("Perm(name: {:?}, owner: {:?}, id: {:?})", self.name, self.owner, self.id).fmt(f)
+    }
 }

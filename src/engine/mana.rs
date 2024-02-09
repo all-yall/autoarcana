@@ -36,7 +36,7 @@ impl Cost {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Debug)]
 pub enum ManaType {
     White,
     Blue,
