@@ -17,7 +17,7 @@ use crate::{
     engine::{
         player::PlayerID,
         prelude::CardID,
-        ability::{AbilityID, AssignedAbility}, card_play::AssignedCardPlay,
+        ability::AbilityID,
     },
     client::{
         player_action_listener::PlayerActionListener,
@@ -47,8 +47,8 @@ pub type PlayerActionResponse = PlayerAction;
 #[derive(Debug, Clone)]
 pub enum PlayerAction {
     Pass,
-    CardPlay(AssignedCardPlay, String),
-    ActivateAbility(AssignedAbility, String),
+    CardPlay(AbilityID, String),
+    ActivateAbility(AbilityID, String),
 }
 
 impl Client {
