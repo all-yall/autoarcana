@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, process::exit};
 
+use crate::impls::card_plays::CastSpell;
 use crate::{engine::prelude::*, client::GameStateSnapshot};
 use crate::client::{Client, PlayerAction};
 
@@ -288,11 +289,16 @@ impl Game {
                 );
             }
 
-            match self.client.choose_options(player_actions) {
-                PlayerAction::CardPlay(idx, _) => todo!(),
-                PlayerAction::ActivateAbility(ability_id, _) => todo!(),
-                PlayerAction::Pass => continue,
-            }
+            // TODO implement checking of cost and payment + rejection if not good
+            let new_event = match self.client.choose_options(player_actions) {
+                PlayerAction::CardPlay(as_card_play, _) => GameEvent::PlaySpell(as_card_play),
+                PlayerAction::ActivateAbility(as_ability, _) => GameEvent::ActivateAbility(as_ability),
+                PlayerAction::Pass => break,
+            };
+
+            // TODO which main phase? always the first? really?
+            self.push_event(GameEvent::Step(TurnStep::FirstMainPhase, player_id));
+            self.push_event(new_event);
         }
     }
 
