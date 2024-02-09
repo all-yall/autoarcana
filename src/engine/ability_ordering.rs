@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, cell::Cell};
 use log::warn;
 
 use super::prelude::*;
@@ -11,7 +11,9 @@ pub struct AbilityOrdering {
     static_order: Vec<AssignedAbility>,
     replacement_order: Vec<AssignedAbility>,
     trigger_order: Vec<AssignedAbility>,
-    fresh: bool,
+
+    // Is only for logging purposes.
+    fresh: Cell<bool>,
 }
 
 impl AbilityOrdering {
@@ -20,7 +22,7 @@ impl AbilityOrdering {
             static_order: vec![],
             replacement_order: vec![],
             trigger_order: vec![],
-            fresh: true
+            fresh: Cell::new(true),
         }
     }
 
@@ -58,7 +60,7 @@ impl AbilityOrdering {
 
     /// Puts query through the ability ordering to apply all 
     /// continuous effects 
-    pub fn query(&mut self, game: &Game, query: &mut GameQuery) {
+    pub fn query(&self, game: &Game, query: &mut GameQuery) {
         self.check_fresh();
 
         for as_ability in self.static_order.iter() {
@@ -69,7 +71,7 @@ impl AbilityOrdering {
 
     /// Puts event through the ability ordering to apply all trigger
     /// and replacement effects
-    pub fn listen(&mut self, mut event: GameEvent, game: &Game) -> ListenResult {
+    pub fn listen(&self, mut event: GameEvent, game: &Game) -> ListenResult {
         self.check_fresh();
 
         let mut new_events = Vec::new();
@@ -81,11 +83,13 @@ impl AbilityOrdering {
             if let Some(ev) = result.0 {
                 event = ev;
             } else {
-                self.fresh = false;
                 return (None, new_events);
             }
         }
-        self.fresh = self.fresh && new_events.is_empty();
+
+        // if an Some(event) is returned, then it will be applied to the game
+        // state, and this ordering may no longer be fresh.
+        self.fresh.set(false);
 
         (Some(event), new_events)
     }
@@ -94,7 +98,7 @@ impl AbilityOrdering {
     /// generates new events, then the current abilityOrdering should
     /// no longer be trusted, so a warning is printed
     fn check_fresh(&self) {
-        if !self.fresh {
+        if !self.fresh.get() {
             warn!("Using non-fresh ability ordering, could produce incorrect results.");
         }
     }

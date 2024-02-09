@@ -115,15 +115,16 @@ impl Game {
         self.event_stack.push(event);
     }
 
-    pub fn default_event_handler(&mut self, event: GameEvent) {
+    pub fn default_event_handler(&mut self, event: GameEvent, ability_order: &AbilityOrdering) {
         use GameEvent::*;
         match event {
             StartTurn(player_id) => {
+                // in reverse because event_stack is lifo
                 for turn_step in DEFAULT_TURN_STRUCTURE.iter().rev() {
                     self.event_stack.push(Step(*turn_step, player_id));
                 }
             },
-            Step(step, player_id) => self.handle_step_event(step, player_id), 
+            Step(step, player_id) => self.handle_step_event(step, player_id, ability_order), 
 
             DrawCard(player_id) => {
                 let drawn_card = self.cards.draw(player_id);
@@ -178,14 +179,14 @@ impl Game {
         AbilityOrdering::build_from(self)
     }
 
-    pub fn all_abilities(&self, order: &mut AbilityOrdering) -> Vec<AssignedAbility> {
+    pub fn all_abilities(&self, order: &AbilityOrdering) -> Vec<AssignedAbility> {
         self.battlefield
             .keys()
             .flat_map(|perm_id| self.perm_abilities(*perm_id, order).into_iter())
             .collect()
     }
 
-    pub fn all_card_plays(&self, order: &mut AbilityOrdering) -> Vec<AssignedCardPlay> {
+    pub fn all_card_plays(&self, order: &AbilityOrdering) -> Vec<AssignedCardPlay> {
         self.players
             .iter()
             .flat_map(|player| self.cards.hand(player.id).into_iter())
@@ -193,7 +194,7 @@ impl Game {
             .collect()
     }
 
-    pub fn card_plays(&self, card_id: CardID, order: &mut AbilityOrdering) -> Vec<AssignedCardPlay> {
+    pub fn card_plays(&self, card_id: CardID, order: &AbilityOrdering) -> Vec<AssignedCardPlay> {
         let mut query = GameQuery::CardAbilities(card_id, vec![]);
         self.query(&mut query, order);
         if let GameQuery::CardAbilities(_, abilities) = query { 
@@ -205,7 +206,7 @@ impl Game {
         panic!("query type was changed!");
     }
 
-    pub fn perm_abilities(&self, perm_id: PermanentID, order: &mut AbilityOrdering) -> Vec<AssignedAbility> {
+    pub fn perm_abilities(&self, perm_id: PermanentID, order: &AbilityOrdering) -> Vec<AssignedAbility> {
         let mut query = GameQuery::PermanentAbilities(perm_id, vec![]);
         self.query(&mut query, order);
         if let GameQuery::PermanentAbilities(_, abilities) = query { 
@@ -219,7 +220,7 @@ impl Game {
     }
 
 
-    pub fn query(&self, query: &mut GameQuery, ability_ordering: &mut AbilityOrdering) {
+    pub fn query(&self, query: &mut GameQuery, ability_order: &AbilityOrdering) {
         match query {
             GameQuery::PermanentAbilities(perm_id, ref mut abilities) => {
                 let perm_abilities = self.battlefield
@@ -235,10 +236,10 @@ impl Game {
             }
         }
 
-        ability_ordering.query(self, query);
+        ability_order.query(self, query);
     }
 
-    pub fn handle_step_event(&mut self, turn_step: TurnStep, player_id: PlayerID) {
+    pub fn handle_step_event(&mut self, turn_step: TurnStep, player_id: PlayerID, ability_order: &AbilityOrdering) {
         use TurnStep::*;
         use GameEvent::*;
         match turn_step {
@@ -251,7 +252,7 @@ impl Game {
             }
             Upkeep => {},
             Draw => self.event_stack.push(DrawCard(player_id)),
-            FirstMainPhase => self.main_phase(player_id),
+            FirstMainPhase => self.main_phase(player_id, ability_order),
             Combat => todo!(),
             SecondMainPhase => todo!(),
             Discard => todo!(),
@@ -259,14 +260,12 @@ impl Game {
         }
     }
 
-    pub fn main_phase(&mut self, player_id: PlayerID) {
-        let mut ability_order = self.build_ability_order();
-
+    pub fn main_phase(&mut self, player_id: PlayerID, ability_order: &AbilityOrdering) {
         loop {
             let mut player_actions = vec![PlayerAction::Pass];
 
             // collect all abilities, then sort into type and if the player controls the ability
-            for assigned_ability in self.all_abilities(&mut ability_order) {
+            for assigned_ability in self.all_abilities(&ability_order) {
                 let player = self.get(assigned_ability.perm).owner;
 
                 if player != player_id {continue}
@@ -276,7 +275,7 @@ impl Game {
             }
 
             // collect all abilities, then sort into type and if the player controls the ability
-            for assigned_card_play in self.all_card_plays(&mut ability_order) {
+            for assigned_card_play in self.all_card_plays(&ability_order) {
                 let player = self.get(assigned_card_play.card).owner;
 
                 if player != player_id {continue}
@@ -320,9 +319,19 @@ impl Game {
 
     pub fn run(&mut self) {
         self.push_event(GameEvent::StartTurn(self.active_player));
+        let mut ability_order =  AbilityOrdering::build_from(self);
+
         loop {
             let event = self.event_stack.pop().unwrap();
-            self.default_event_handler(event);
+            let (maybe_original_event, new_events) = ability_order.listen(event, self);
+            self.event_stack.extend(new_events.into_iter());
+
+            // The event wasn't canceled, so we are now applying it.
+            if let Some(event) = maybe_original_event {
+                self.default_event_handler(event, &ability_order);
+                // The game state has changed, so the ability order should be updated.
+                ability_order = AbilityOrdering::build_from(self);
+            }
         }
     }
 
