@@ -1,10 +1,12 @@
+use crate::client::event::EventHandler;
 use crate::engine::player::PlayerID;
 
 use super::game_state_listener::GameStateListener;
+use super::input_handler::InputEvent;
 use super::player_action_listener::PlayerActionListener;
 use super::PlayerActionResponse;
 use super::tui::Tui;
-use super::event::{Event, InputHandler};
+use super::input_handler::InputHandler;
 
 use crossterm::event::KeyCode;
 use color_eyre::Result;
@@ -52,10 +54,10 @@ impl App {
         info!("Initializing ratatui terminal");
         let terminal = ratatui::Terminal::new(backend)?;
 
-        let input_handler = InputHandler::new();
+        let mut input_handler = InputHandler::new();
 
         info!("Configuring user event handler");
-        let events = InputHandler::new();
+        let events = EventHandler::new();
         let mut tui = Tui::new(terminal, events);
         tui.enter()?;
 
@@ -92,7 +94,8 @@ impl App {
     }
 
     pub fn is_key_down(&mut self, key: KeyCode) -> bool {
-        self.key_down.contains(&key)
+        //self.key_down.contains(&key)
+        todo!("Adding this to get it to compile")
     }
 
     pub fn update(&mut self, input: InputEvent) {

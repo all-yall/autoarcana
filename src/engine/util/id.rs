@@ -1,4 +1,4 @@
-use std::{iter::Iterator, marker::PhantomData, fmt::Debug, any::type_name, hash::Hash};
+use std::{iter::Iterator, marker::PhantomData, fmt::Debug, any::type_name, hash::Hash, cell::Cell};
 
 pub struct ID<T> (usize, PhantomData<T>);
 
@@ -52,16 +52,18 @@ impl<T> PartialOrd for ID<T> {
 }
 
 
-pub struct IDFactory<I>(usize, PhantomData<I>);
+pub struct IDFactory<I>(Cell<usize>, PhantomData<I>);
 
 impl<T> IDFactory<ID<T>> {
     pub fn new() -> Self {
-        Self(0, PhantomData::default())
+        Self(Cell::new(0), PhantomData::default())
     }
 
-    pub fn get_id(&mut self) -> ID<T> {
-        self.0 += 1;
-        ID(self.0, PhantomData::default())
+    pub fn get_id(&self) -> ID<T> {
+        let mut num = self.0.get();
+        num += 1;
+        self.0.set(num);
+        ID(num, PhantomData::default())
     }
 }
 

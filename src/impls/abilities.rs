@@ -8,19 +8,21 @@ impl NullEffect {
     }
 }
 
+impl Effect for NullEffect {}
+
 impl EventModifier for NullEffect {
-    fn listen(&mut self, _ability: AbilityID, event: GameEvent, _game: &mut Game) -> ListenResult {
+    fn listen(&self, _ability: AbilityID, perm: PermanentID, event: GameEvent, _game: &Game) -> ListenResult {
         (Some(event), vec![])
     }
 }
 
 impl QueryModifier for NullEffect {
-    fn query(&self, ability: AbilityID, query: &mut GameQuery, game: &Game) {
+    fn query(&self, _: AbilityID, _: PermanentID, _: &mut GameQuery, _: &Game) {
     }
 }
 
 impl OneShot for NullEffect {
-    fn activate(&mut self, _ability: AbilityID, _game: &mut Game) {
+    fn activate(&self, _: AbilityID, _: PermanentID, _: &mut Game) {
     }
 }
 
@@ -34,10 +36,11 @@ impl AddManaEffect {
     }
 }
 
+impl Effect for AddManaEffect {}
 impl OneShot for AddManaEffect {
-    fn activate(&mut self, ability_id: AbilityID, game: &mut Game) {
-        let player_id = game.get_player_id_from_ability_id(ability_id);
-        game.push_event(GameEvent::AddMana(player_id, self.mana_type, EventSource::Ability(ability_id)))
+    fn activate(&self, _: AbilityID, perm: PermanentID, game: &mut Game) {
+        let player_id = game.get(perm).owner;
+        game.push_event(GameEvent::AddMana(player_id, self.mana_type, EventSource::Permanent(perm)))
     }
 }
 
@@ -46,50 +49,29 @@ pub struct MiraisMana {}
 impl MiraisMana {
     pub fn new() -> Box<Self> { Box::new(Self{}) }
 }
+
+impl Effect for MiraisMana {}
 impl EventModifier for MiraisMana {
-    fn listen(&mut self, ability_id: AbilityID, event: GameEvent, game: &mut Game) -> ListenResult {
+    fn listen(&self, _: AbilityID, perm: PermanentID, event: GameEvent, game: &Game) -> ListenResult {
         let mut additional = vec![];
         match event {
-            GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Ability(ability_id_source)) => {
-                let i_am_recieving_mana = game.get_player_id_from_ability_id(ability_id) == player_id_recv_mana;
-                let it_is_from_a_land = game.get_perm_from_ability_id(ability_id_source).type_line.is(CardType::Land);
-                if i_am_recieving_mana && it_is_from_a_land {
+            GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Permanent(perm_source)) => {
+                // TODO change this to use queries instead of reading game state.
+                // This ability will not work correctly with static abilities that
+                // change ownership and/or types
+                let i_am_the_reciever = game.get(perm).owner == player_id_recv_mana;
+                let mana_is_from_a_land = game.get(perm_source).type_line.is(CardType::Land);
+                if i_am_the_reciever && mana_is_from_a_land {
                     additional.push(
                         GameEvent::AddMana(
                             player_id_recv_mana, 
                             mana_type, 
-                            EventSource::Ability(ability_id)));
+                            EventSource::Permanent(perm)));
                 }
             }
             _ => {}
         }
 
         (Some(event), additional)
-    }
-}
-
-#[derive(Clone)]
-pub struct CastSpell {}
-
-impl CastSpell {
-    pub fn new() -> Box<dyn OneShot> {
-        Box::new(Self{})
-    }
-
-    pub fn ability() -> LatentAbility {
-        LatentAbility { 
-            class: AbilityClass::Activated(Cost::empty(), Self::new()), 
-            description: "Play spell".into() 
-        }
-    }
-}
-
-impl OneShot for CastSpell {
-    fn activate(&mut self, ability_id: AbilityID, game: &mut Game) {
-        let new_perm_id = game.perm_ids.get_id();
-        let card_id = game.get_card_id_from_ability_id(ability_id);
-        let card = game.get(card_id);
-        let permanent = Permanent::from_card(card, new_perm_id, card.owner);
-        game.push_event(GameEvent::RegisterPermanent(permanent, card.base.perm_abilities.clone()));
     }
 }

@@ -26,16 +26,16 @@ impl Permanent {
 
     pub fn from_card(card: &Card, id: PermanentID, owner: PlayerID) -> Self {
         Self {
-            name: card.base.name.clone(),
-            flavor: card.base.flavor.clone(),
+            name: card.attrs.name.clone(),
+            flavor: card.attrs.flavor.clone(),
             card: Some(card.id),
             is_token: false,
             owner,
-            base_power: card.base.power.unwrap(),
-            base_toughness: card.base.toughness.unwrap(),
-            type_line: card.base.type_line.clone(),
+            base_power: card.attrs.power_toughness.unwrap().0,
+            base_toughness: card.attrs.power_toughness.unwrap().1,
+            type_line: card.attrs.type_line.clone(),
             id,
-            abilities: vec![],
+            abilities: vec![], //TODO grab ability IDs from permanent
             tapped: false,
             summoning_sickness: true,
         }

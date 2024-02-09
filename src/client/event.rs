@@ -70,6 +70,10 @@ impl EventHandler {
         }
     }
 
+    pub fn next(&self) {
+        todo!("added to get it to compile")
+    }
+
     pub fn try_recv(&self) -> Result<Option<Event>> {
         let result = self.receiver.try_recv();
         match result {

@@ -1,8 +1,7 @@
-use std::{collections::{BTreeMap, HashSet}, process::exit};
+use std::{collections::BTreeMap, process::exit};
 
 use crate::{engine::prelude::*, client::GameStateSnapshot};
 use crate::client::{Client, PlayerAction};
-use log::warn;
 
 use super::util::id::{
     ID,
@@ -12,63 +11,6 @@ use super::util::id::{
 
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
-#[derive(Clone, Copy)]
-pub enum TurnStep {
-    Untap,
-    Upkeep,
-    Draw,
-    FirstMainPhase,
-    Combat,
-    SecondMainPhase,
-    Discard,
-    CleanUp,
-}
-
-pub const DEFAULT_TURN_STRUCTURE: [TurnStep; 8] = [
-    TurnStep::Untap,
-    TurnStep::Upkeep,
-    TurnStep::Draw,
-    TurnStep::FirstMainPhase,
-    TurnStep::Combat,
-    TurnStep::SecondMainPhase,
-    TurnStep::Discard,
-    TurnStep::CleanUp,
-];
-
-pub enum EventSource {
-    Ability(AbilityID),
-    Player(PlayerID),
-    GameRule,
-}
-
-/// This represents any game modification event
-/// that is relevant to other abilities, and could
-/// potentially be modified by them.
-pub enum GameEvent {
-    StartTurn(PlayerID),
-    Step(TurnStep, PlayerID),
-    UntapPerm(PermanentID),
-    DrawCard(PlayerID),
-    Lose(PlayerID),
-
-    PlaySpell(AbilityID),
-    ActivateAbility(AbilityID),
-
-    AddMana(PlayerID, ManaType, EventSource),
-
-    RegisterPermanent(Permanent, Vec<LatentAbility>),
-    EnterTheBattleField(PermanentID),
-}
-
-
-/// This represents any read of game state that could
-/// be modified by other abilities. Mostly continuous
-/// effects are what should be considered.
-pub enum GameQuery {
-    PermanentAbilities(PermanentID, Vec<AbilityID>),
-    CardAbilities(CardID, Vec<AbilityID>),
-}
-
 
 /// The Game object contains all game information
 /// and additionally acts as a store for all game
@@ -77,134 +19,31 @@ pub enum GameQuery {
 pub struct Game {
     pub players: Vec<Player>,
     pub active_player: PlayerID,
-    pub exile_zone: Deck,
-    pub battlefield: BTreeMap<PermanentID, Permanent>,
-    pub abilities: BTreeMap<AbilityID, Ability>,
     pub turn_number: usize,
     pub game_over: bool,
     pub event_stack: Vec<GameEvent>,
     pub cards: CardStore,
 
+    pub battlefield: BTreeMap<PermanentID, Permanent>,
+    pub abilities: BTreeMap<AbilityID, Ability>,
+    pub card_plays: BTreeMap<CardPlayID, CardPlay>,
+
+
     pub perm_ids: IDFactory<PermanentID>,
     pub ability_ids: IDFactory<AbilityID>,
+    pub card_play_ids: IDFactory<CardPlayID>,
 
     // send game updates to clients
     state_update_sender: BroadcastSender<GameStateSnapshot>,
     client: Client,
 }
 
-/// This represents the ordering that abilities
-/// should be applied. This includes the Layer system
-/// and the ordering of replacement effects before trigger
-/// effects.
-pub struct AbilityOrdering {
-    static_order: Vec<AbilityID>,
-    replacement_order: Vec<AbilityID>,
-    trigger_order: Vec<AbilityID>,
-    fresh: bool,
-}
-
-impl AbilityOrdering {
-    fn new() -> Self {
-        Self {
-            static_order: vec![],
-            replacement_order: vec![],
-            trigger_order: vec![],
-            fresh: true
-        }
-    }
-
-    fn build_from(game: &mut Game) -> Self {
-        let mut order = Self::new();
-        let mut seen_ids = HashSet::new();
-        let mut done = true;
-
-        while !done {
-            let abilities = game.all_abilities(&mut order);
-
-            for ability_id in abilities.iter() {
-                let seen = !seen_ids.insert(*ability_id);
-                if seen {
-                    continue
-                }
-
-                let ability = game.get(*ability_id);
-                match ability.base.class {
-                    AbilityClass::Replacement(_)  => order.replacement_order.push(*ability_id),
-                    AbilityClass::Triggered(_)  => order.trigger_order.push(*ability_id),
-                    AbilityClass::Static(_) => {
-                        order.static_order.push(*ability_id);
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            done = true;
-        }
-
-        order
-    }
-
-    /// Puts query through the ability ordering to apply all 
-    /// continuous effects 
-    pub fn query(&mut self, game: &Game, query: &mut GameQuery) {
-        self.check_fresh();
-
-        for ability_id in self.static_order.iter() {
-            let ability = game.abilities.get(ability_id).unwrap();
-            ability.query(query, game);
-        }
-    }
-
-    /// Puts event through the ability ordering to apply all trigger
-    /// and replacement effects
-    pub fn listen(&mut self, mut event: GameEvent, game: &mut Game) -> ListenResult {
-        self.check_fresh();
-
-        let mut new_events = Vec::new();
-        for ability_id in self.replacement_order.iter().chain(self.trigger_order.iter()) {
-            let mut ability = game.abilities.remove(ability_id).unwrap();
-            let result = ability.listen(event, game); 
-            game.abilities.insert(*ability_id, ability);
-
-            new_events.extend(result.1);
-            if let Some(ev) = result.0 {
-                event = ev;
-            } else {
-                self.fresh = false;
-                return (None, new_events);
-            }
-        }
-        self.fresh = self.fresh && new_events.is_empty();
-
-        (Some(event), new_events)
-    }
-
-    /// A sanity checking function; In the event that the abilityOrder 
-    /// generates new events, then the current abilityOrdering should
-    /// no longer be trusted, so a warning is printed
-    fn check_fresh(&self) {
-        if !self.fresh {
-            warn!("Using non-fresh ability ordering, could produce incorrect results.");
-        }
-    }
-
-    fn add_from(&mut self, abilities: Vec<AbilityID>, game: &mut Game) -> bool {
-        self.check_fresh();
-
-        // TODO sort by layer here
-
-
-        return false;
-    }
-}
 
 impl Game {
     pub fn new(decks: Vec<Vec<LatentCard>>) -> Self {
 
-        let mut card_ids = IDFactory::new();
-        let mut player_ids = IDFactory::new()
+        let card_ids = IDFactory::new();
+        let player_ids = IDFactory::new()
             .take(decks.len())
             .collect::<Vec<_>>();
         let active_player = *player_ids.first().expect("Need at least on player in the game");
@@ -217,16 +56,18 @@ impl Game {
         let mut game = Self {
             active_player,
             players: Vec::new(),
-            exile_zone: Deck::empty(),
             turn_number: 0,
             game_over: false,
             event_stack: vec![],
+
+            card_plays: BTreeMap::new(),
             battlefield: BTreeMap::new(),
             abilities: BTreeMap::new(),
             cards: CardStore::new(&player_ids),
 
             perm_ids: IDFactory::new(),
             ability_ids: IDFactory::new(),
+            card_play_ids: IDFactory::new(),
 
             state_update_sender,
             client,
@@ -237,14 +78,29 @@ impl Game {
             .zip(player_ids)
             .map(|(deck, player_id)| {
                 deck.into_iter().for_each(|base| {
-                        let card_id = card_ids.get_id();
-                        let card_abilities = base.card_abilities
-                            .iter()
-                            .map(|ability| game.add_ability(ability.clone(), AbilityHolder::Card(card_id)))
-                            .collect();
-                        let card = Card::new(base, card_id, card_abilities, player_id);
-                        game.cards.put_card(card, Zone::Deck(player_id));
-                    });
+                    let card_id = card_ids.get_id();
+                    let  LatentCard {attributes, perm_abilities, card_plays} = base;
+
+                    let perm_ability_ids = perm_abilities
+                        .into_iter()
+                        .map(|ability| game.add_ability(ability))
+                        .collect();
+
+                    let card_play_ids = card_plays
+                        .into_iter()
+                        .map(|card_play| game.add_card_play(card_play))
+                        .collect();
+
+                    let card = Card::new(
+                        attributes, 
+                        card_id, 
+                        perm_ability_ids, 
+                        card_play_ids,
+                        player_id
+                    );
+
+                    game.cards.put_card(card, Zone::Deck(player_id));
+                });
                 Player::new(player_id)
         }).collect();
 
@@ -286,13 +142,9 @@ impl Game {
                 exit(0);
             }
 
-            RegisterPermanent(perm, abilities) => {
+            RegisterPermanent(perm) => {
                 let id = perm.id;
                 self.battlefield.insert(id, perm);
-                let abilities = abilities.into_iter().map(|ability| {
-                    self.add_ability(ability, AbilityHolder::Permanent(id))
-                }).collect();
-                self.get_perm_from_perm_id(id).abilities = abilities;
                 self.push_event(EnterTheBattleField(id));
             }
 
@@ -300,20 +152,22 @@ impl Game {
                 self.get_player(player_id).mana_pool.push(mana_type);
             }
 
-            PlaySpell(ability_id) => {
-                let mut ability = self.get(ability_id).clone();
-                match ability.base.class {
-                    AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
-                    _ => panic!("Expected activated ability for PlaySpell event")
-                }
+            PlaySpell(as_card_play) => {
+                let card_play = self.get(as_card_play.card_play);
+                card_play.spawn.spawn(as_card_play.card, self);
             }
 
-            ActivateAbility(ability_id) => {
-                let mut ability = self.get(ability_id).clone();
+            ActivateAbility(as_ability) => {
+                // TODO: this is not the best way to do this; removing the ability from
+                // the map the get around the borrow checker. 
+                // a better solution in which abilities are not stored in the game object,
+                // or the abilities not being able to modify the game directly
+                let ability = self.abilities.remove(&as_ability.ability).expect("Invalid ability ID should not be possible");
                 match ability.base.class {
-                    AbilityClass::Activated(_, ref mut ability) => ability.activate(ability_id, self),
+                    AbilityClass::Activated(_, ref ability) => ability.activate(as_ability.ability, as_ability.perm, self),
                     _ => panic!("Expected activated ability for ActivateAbility event")
                 }
+                self.abilities.insert(as_ability.ability, ability);
             }
 
             EnterTheBattleField(_) => {}
@@ -321,51 +175,47 @@ impl Game {
     }
 
     pub fn build_ability_order(&mut self) -> AbilityOrdering {
-        let mut ordering = AbilityOrdering::new();
-
-        let mut unfinished = false;
-        while unfinished {
-            let abilities = self.all_abilities(&mut ordering);
-            unfinished = ordering.add_from(abilities, self);
-        }
-
-        return ordering;
+        AbilityOrdering::build_from(self)
     }
 
-    pub fn all_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
-        let mut perm = self.all_perm_abilities(order);
-        let card = self.all_card_abilities(order);
-        perm.extend(card);
-        perm
-    }
-
-    pub fn all_perm_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+    pub fn all_abilities(&self, order: &mut AbilityOrdering) -> Vec<AssignedAbility> {
         self.battlefield
             .keys()
             .flat_map(|perm_id| self.perm_abilities(*perm_id, order).into_iter())
             .collect()
     }
 
-    pub fn all_card_abilities(&self, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+    pub fn all_card_plays(&self, order: &mut AbilityOrdering) -> Vec<AssignedCardPlay> {
         self.players
             .iter()
             .flat_map(|player| self.cards.hand(player.id).into_iter())
-            .flat_map(|card| self.card_abilities(card.id, order).into_iter())
+            .flat_map(|card| self.card_plays(card.id, order).into_iter())
             .collect()
     }
 
-    pub fn card_abilities(&self, card_id: CardID, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+    pub fn card_plays(&self, card_id: CardID, order: &mut AbilityOrdering) -> Vec<AssignedCardPlay> {
         let mut query = GameQuery::CardAbilities(card_id, vec![]);
         self.query(&mut query, order);
-        if let GameQuery::CardAbilities(_, abilities) = query { return abilities }
+        if let GameQuery::CardAbilities(_, abilities) = query { 
+            return abilities
+                .into_iter()
+                .map(|card_play| AssignedCardPlay::new(card_id, card_play))
+                .collect()
+        }
         panic!("query type was changed!");
     }
 
-    pub fn perm_abilities(&self, perm_id: PermanentID, order: &mut AbilityOrdering) -> Vec<AbilityID> {
+    pub fn perm_abilities(&self, perm_id: PermanentID, order: &mut AbilityOrdering) -> Vec<AssignedAbility> {
         let mut query = GameQuery::PermanentAbilities(perm_id, vec![]);
         self.query(&mut query, order);
-        if let GameQuery::PermanentAbilities(_, abilities) = query { return abilities }
-        panic!("query type was changed!");
+        if let GameQuery::PermanentAbilities(_, abilities) = query { 
+            return abilities
+                .into_iter()
+                .map(|ability_id| AssignedAbility::new(perm_id, ability_id))
+                .collect() 
+        } else {
+            panic!("query type was changed!");
+        }
     }
 
 
@@ -380,9 +230,8 @@ impl Game {
                 abilities.extend(perm_abilities);
             }
 
-            GameQuery::CardAbilities(card_id, ref mut abilities) => {
-                let card_abilities = self.cards.get_card(*card_id).abilities.iter();
-                abilities.extend(card_abilities);
+            GameQuery::CardAbilities(card_id, ref mut card_plays) => {
+                card_plays.extend(self.cards.get_card(*card_id).card_plays.iter());
             }
         }
 
@@ -414,29 +263,26 @@ impl Game {
         let mut ability_order = self.build_ability_order();
 
         loop {
-            let abilities = self.all_abilities(&mut ability_order);
-
             let mut player_actions = vec![PlayerAction::Pass];
 
             // collect all abilities, then sort into type and if the player controls the ability
-            for ability_id in abilities.into_iter() {
-                let ability_holder = self.get(ability_id).holder.clone();
-                match ability_holder {
-                    AbilityHolder::Card(card_id) =>  {
-                        let player = self.get_player_id_from_card_id(card_id);
-                        if player != player_id {continue}
-                        player_actions.push(
-                            PlayerAction::CardPlay(ability_id, self.get(ability_id).base.description.clone())
-                        );
-                    }
-                    AbilityHolder::Permanent(perm_id) =>  {
-                        let player = self.get_player_id_from_perm_id(perm_id);
-                        if player != player_id {continue}
-                        player_actions.push(
-                            PlayerAction::ActivateAbility(ability_id, self.get(ability_id).base.description.clone())
-                        );
-                    }
-                }
+            for assigned_ability in self.all_abilities(&mut ability_order) {
+                let player = self.get(assigned_ability.perm).owner;
+
+                if player != player_id {continue}
+                player_actions.push(
+                    PlayerAction::ActivateAbility(assigned_ability, self.get(assigned_ability.ability).base.description.clone())
+                );
+            }
+
+            // collect all abilities, then sort into type and if the player controls the ability
+            for assigned_card_play in self.all_card_plays(&mut ability_order) {
+                let player = self.get(assigned_card_play.card).owner;
+
+                if player != player_id {continue}
+                player_actions.push(
+                    PlayerAction::CardPlay(assigned_card_play, self.get(assigned_card_play.card_play).description.clone())
+                );
             }
 
             match self.client.choose_options(player_actions) {
@@ -447,10 +293,16 @@ impl Game {
         }
     }
 
-    fn add_ability(&mut self, ability: LatentAbility, holder: AbilityHolder) -> AbilityID {
+    fn add_ability(&mut self, ability: LatentAbility) -> AbilityID {
         let id = self.ability_ids.get_id();
-        let ability = Ability::new(ability, id, holder);
+        let ability = Ability::new(ability, id);
         self.abilities.insert(id, ability);
+        id
+    }
+
+    fn add_card_play(&mut self, card_play: CardPlay) -> CardPlayID {
+        let id = self.card_play_ids.get_id();
+        self.card_plays.insert(id, card_play);
         id
     }
     
@@ -485,15 +337,6 @@ impl Game {
     }
 
 
-
-    pub fn get_player_id_from_ability_id(&mut self, ability_id: AbilityID) -> PlayerID {
-        let ability = self.abilities.get(&ability_id).unwrap();
-        match ability.holder {
-            AbilityHolder::Permanent(perm) => self.get_player_id_from_perm_id(perm),
-            _ => panic!("ahhh!")
-        }
-    }
-
     pub fn get_player_id_from_perm_id(&mut self, perm_id: PermanentID) -> PlayerID {
         self.get_perm_from_perm_id(perm_id).owner
     }
@@ -505,32 +348,6 @@ impl Game {
     pub fn get_perm_from_perm_id(&mut self, perm_id: PermanentID) -> &mut Permanent {
         self.battlefield.get_mut(&perm_id).unwrap()
     }
-
-    pub fn get_perm_id_from_ability_id(&mut self, ability_id: AbilityID) -> PermanentID {
-        let ability = self.get(ability_id);
-        match ability.holder {
-            AbilityHolder::Permanent(perm) => perm,
-            _ => panic!("asserted that ability was held by permanent when it was not.")
-        }
-    }
-
-    pub fn get_perm_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Permanent {
-        let perm_id = self.get_perm_id_from_ability_id(ability_id);
-        self.battlefield.get_mut(&perm_id).unwrap()
-    }
-
-    pub fn get_card_from_ability_id(&mut self, ability_id: AbilityID) -> &mut Card {
-        let card_id = self.get_card_id_from_ability_id(ability_id);
-        self.get_mut(card_id)
-    }
-
-    pub fn get_card_id_from_ability_id(&mut self, ability_id: AbilityID) -> CardID {
-        let ability = self.get(ability_id);
-        match ability.holder {
-             AbilityHolder::Card(card) => card,
-            _ => panic!("asserted that ability was held by card when it was not.")
-        }
-    }
 }
 
 impl IDMapper<Ability> for Game {
@@ -541,6 +358,10 @@ impl IDMapper<Ability> for Game {
 impl IDMapper<Player> for Game {
     fn get(&self, id: ID<Player>) -> &Player { self.players.iter().find(|player| player.id == id).unwrap() }
     fn get_mut(&mut self, id: ID<Player>) -> &mut Player { self.players.iter_mut().find(|player| player.id == id).unwrap() }
+}
+impl IDMapper<CardPlay> for Game {
+    fn get(&self, id: ID<CardPlay>) -> &CardPlay { self.card_plays.get(&id).unwrap() }
+    fn get_mut(&mut self, id: ID<CardPlay>) -> &mut CardPlay { self.card_plays.get_mut(&id).unwrap() }
 }
 
 impl IDMapper<Card> for Game {

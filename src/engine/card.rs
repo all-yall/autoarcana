@@ -4,43 +4,55 @@ use super::util::id::ID;
 
 pub type CardID = ID<Card>;
 
-#[derive(Clone)]
 pub struct Card {
     pub owner: PlayerID,
     pub id: CardID,
-    pub abilities: Vec<AbilityID>,
-    pub base: LatentCard,
+    pub perm_abilities: Vec<AbilityID>,
+    pub card_plays: Vec<CardPlayID>,
+    pub attrs: Attributes,
 }
 
 impl Card {
-    pub fn new(base: LatentCard, id: CardID, abilities: Vec<AbilityID>, owner: PlayerID) -> Self {
-        Self {base, id, abilities, owner}
+    pub fn new(attrs: Attributes, id: CardID, perm_abilities: Vec<AbilityID>, card_plays: Vec<CardPlayID>, owner: PlayerID) -> Self {
+        Self {
+            attrs,
+            id, 
+            perm_abilities, 
+            card_plays, // todo insert actual card plays!!
+            owner
+        }
     }
 }
 
-#[derive(Clone)]
 pub struct LatentCard {
-    pub cost: ManaCost,
-    pub name: String,
-    pub flavor: String,
-    pub type_line: TypeLine,
+    pub attributes: Attributes,
     pub perm_abilities: Vec<LatentAbility>,
-    pub card_abilities: Vec<LatentAbility>,
-    pub power: Option<i32>,
-    pub toughness: Option<i32>,
+    pub card_plays: Vec<CardPlay>,
+}
+
+pub struct Attributes {
+    pub name: String,
+    pub type_line: TypeLine,
+    pub cost: Option<ManaCost>,
+    pub flavor: String,
+    pub power_toughness: Option<(i32, i32)>,
 }
 
 impl LatentCard {
-    pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_abilities: Vec<LatentAbility>, power: Option<i32>, toughness: Option<i32>) -> Self {
-        Self {
+    pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_plays: Vec<CardPlay>, power: Option<i32>, toughness: Option<i32>) -> Self {
+        let power_toughness = power.map(|p| toughness.map(|t| (p,t))).unwrap_or(None);
+        let cost = Some(cost);
+        let attributes = Attributes { 
             name,
             cost,
             flavor,
             type_line,
+            power_toughness,
+        };
+        Self {
+            attributes,
             perm_abilities,
-            card_abilities,
-            power,
-            toughness
+            card_plays,
         }
     }
 }

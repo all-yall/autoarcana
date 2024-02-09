@@ -16,6 +16,7 @@ impl InputHandler {
         }
     }
     pub fn next(&mut self) -> Result<InputEvent> {
-        self.events.next().unwrap()
+        self.events.next();
+        todo!("Adding this to get it compiling. This shouldn't be commited.") 
     }
 }
