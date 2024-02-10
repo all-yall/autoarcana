@@ -26,7 +26,7 @@ impl AbilityOrdering {
         }
     }
 
-    pub fn build_from(game: &mut Game) -> Self {
+    pub fn build_from(game: &Game) -> Self {
         let mut order = Self::new();
         let mut seen_abilities = HashSet::new();
         let mut done = true;

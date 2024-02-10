@@ -35,12 +35,12 @@ pub struct Attributes {
     pub type_line: TypeLine,
     pub cost: Option<ManaCost>,
     pub flavor: String,
-    pub power_toughness: Option<(i32, i32)>,
+    pub power_toughness: Option<PowerToughness>,
 }
 
 impl LatentCard {
     pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_plays: Vec<CardPlay>, power: Option<i32>, toughness: Option<i32>) -> Self {
-        let power_toughness = power.map(|p| toughness.map(|t| (p,t))).unwrap_or(None);
+        let power_toughness = power.map(|p| toughness.map(|t| PowerToughness::new(p,t))).unwrap_or(None);
         let cost = Some(cost);
         let attributes = Attributes { 
             name,

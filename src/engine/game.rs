@@ -1,8 +1,12 @@
-use std::{collections::BTreeMap, process::exit};
+use std::{
+    collections::BTreeMap, 
+    process::exit,
+    fmt::Debug,
+};
 
-use crate::impls::card_plays::CastSpell;
-use crate::{engine::prelude::*, client::GameStateSnapshot};
-use crate::client::{Client, PlayerAction};
+use super::prelude::*;
+
+use crate::client::{Client, PlayerAction, GameStateSnapshot};
 
 use super::util::id::{
     ID,
@@ -132,7 +136,7 @@ impl Game {
                 let drawn_card = self.cards.draw(player_id);
                 // Couldn't draw a card, lose the game.
                 if drawn_card.is_none() { 
-                    self.event_stack.push(Lose(player_id));
+                    self.event_stack.push(Lose(player_id, GameRule::CouldntDraw.into()));
                 }
             }
 
@@ -140,7 +144,7 @@ impl Game {
                 self.battlefield.get_mut(&perm_id).unwrap().untap()
             }
 
-            Lose(player_id) => {
+            Lose(player_id, _reason) => {
                 println!("player {:?} lost.", player_id);
                 exit(0);
             }
@@ -174,6 +178,11 @@ impl Game {
             }
 
             EnterTheBattleField(_) => {}
+            LegendConflict(_) => todo!(),
+            Destroy(_, _) => todo!(),
+            Sacrifice(_, _) => todo!(),
+            AddCounters(_, _, _, _) => todo!(),
+            RemoveCounters(_, _, _, _) => todo!(),
         }
     }
 
@@ -197,44 +206,52 @@ impl Game {
     }
 
     pub fn card_plays(&self, card_id: CardID, order: &AbilityOrdering) -> Vec<AssignedCardPlay> {
-        let mut query = GameQuery::CardAbilities(card_id, vec![]);
-        self.query(&mut query, order);
-        if let GameQuery::CardAbilities(_, abilities) = query { 
-            return abilities
-                .into_iter()
-                .map(|card_play| AssignedCardPlay::new(card_id, card_play))
-                .collect()
-        }
-        panic!("query type was changed!");
+        let card_plays = self.query(
+            CardPlaysQuery::new(card_id), 
+            order);
+
+        return card_plays.card_plays
+            .into_iter()
+            .map(|card_play| AssignedCardPlay::new(card_id, card_play))
+            .collect()
     }
 
     pub fn perm_abilities(&self, perm_id: PermanentID, order: &AbilityOrdering) -> Vec<AssignedAbility> {
-        let mut query = GameQuery::PermanentAbilities(perm_id, vec![]);
-        self.query(&mut query, order);
-        if let GameQuery::PermanentAbilities(_, abilities) = query { 
-            return abilities
-                .into_iter()
-                .map(|ability_id| AssignedAbility::new(perm_id, ability_id))
-                .collect() 
-        } else {
-            panic!("query type was changed!");
-        }
+        let perm_abilities = self.query(
+             PermAbilityQuery::new(perm_id), 
+             order);
+
+        return perm_abilities.abilities
+            .into_iter()
+            .map(|ability_id| AssignedAbility::new(perm_id, ability_id))
+            .collect() 
     }
 
 
-    pub fn query(&self, query: &mut GameQuery, ability_order: &AbilityOrdering) {
+    pub fn query<Q: GameQueryVariant>(&self, query: Q, order: &AbilityOrdering) -> Q 
+    where <Q as TryFrom<GameQuery>>::Error : Debug {
+        let mut query = query.into();
+        self.raw_query(&mut query, order);
+        Q::try_from(query).expect("Game query variant changed.")
+    }
+
+    fn raw_query(&self, query: &mut GameQuery, ability_order: &AbilityOrdering) {
         match query {
-            GameQuery::PermanentAbilities(perm_id, ref mut abilities) => {
-                let perm_abilities = self.battlefield
-                    .get(perm_id)
+            GameQuery::PermAbilities(ref mut query) => {
+                let base_abilities = self.battlefield
+                    .get(&query.id)
                     .unwrap()
                     .abilities
                     .iter();
-                abilities.extend(perm_abilities);
+                query.abilities.extend(base_abilities);
             }
 
-            GameQuery::CardAbilities(card_id, ref mut card_plays) => {
-                card_plays.extend(self.cards.get_card(*card_id).card_plays.iter());
+            GameQuery::CardPlays(ref mut query) => {
+                query.card_plays.extend(self.cards.get_card(query.id).card_plays.iter());
+            }
+
+            GameQuery::ObservePerm(ref mut query) => {
+                // TODO account for counters here
             }
         }
 

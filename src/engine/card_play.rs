@@ -29,8 +29,4 @@ pub trait Spawner {
     fn cost(&self, card_id: CardID, game: &Game) -> ManaCost;
 }
 
-pub enum GameObject {
-    Permanent(Permanent),
-    Object, // Sorceries/Instants
-}
 

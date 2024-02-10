@@ -26,6 +26,7 @@ pub enum CardType {
     Sorcery,
     Instant,
     Enchantment,
+    Planeswalker,
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Eq)]

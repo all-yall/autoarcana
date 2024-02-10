@@ -12,4 +12,6 @@ pub use crate::engine::{
     card_play::*,
     ability_ordering::*,
     messages::*,
+    game_facade::*,
+    counters::*,
 };
