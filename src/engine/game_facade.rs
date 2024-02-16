@@ -7,7 +7,6 @@ use super::prelude::*;
 pub struct GameFacade<'a> {
     game: &'a Game,
     ability_order: AbilityOrdering,
-    queued_events: Vec<GameEvent>,
 }
 
 impl<'a> GameFacade<'a> {
@@ -16,18 +15,17 @@ impl<'a> GameFacade<'a> {
         let ret = Self {
             game,
             ability_order,
-            queued_events: Vec::new(),
         };
 
         ret
     }
 
-    pub fn perms(&self) -> Box<dyn Iterator<Item=PermanentID>> {
-        Box::new(self.game.battlefield.keys().cloned())
+    pub fn perms(&'a self) -> impl 'a + Iterator<Item=PermanentID> {
+        self.game.battlefield.keys().cloned()
     }
 
 
-    pub fn players(&self) -> Box<dyn Iterator<Item=PlayerID>> {
+    pub fn players(&'a self) -> impl 'a + Iterator<Item=PlayerID> {
         Box::new(self.game.players.iter().map(|player| player.id))
     }
 
@@ -42,11 +40,4 @@ impl<'a> GameFacade<'a> {
             &self.ability_order);
         query.perm
     }
-
-
-    pub fn get_queued_events(self) -> Vec<GameEvent> {
-        self.queued_events
-    }
 }
-
-

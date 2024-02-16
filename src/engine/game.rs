@@ -23,11 +23,15 @@ use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 /// objects so that they are easily found and rusts
 /// borrow checker doesn't get too mad.
 pub struct Game {
-    pub players: Vec<Player>,
+    pub player_with_last_action: PlayerID,
     pub active_player: PlayerID,
+    pub turn_step: TurnStep,
+
+    pub players: Vec<Player>,
     pub turn_number: usize,
     pub game_over: bool,
     pub event_stack: Vec<GameEvent>,
+    pub game_stack: Vec<GameObject>,
     pub cards: CardStore,
 
     pub battlefield: BTreeMap<PermanentID, Permanent>,
@@ -61,11 +65,16 @@ impl Game {
 
         let mut game = Self {
             active_player,
+            player_with_last_action: active_player,
+            turn_step: TurnStep::Upkeep,
+
             players: Vec::new(),
             turn_number: 0,
             game_over: false,
             event_stack: vec![],
 
+
+            game_stack: Vec::new(),
             card_plays: BTreeMap::new(),
             battlefield: BTreeMap::new(),
             abilities: BTreeMap::new(),
@@ -124,13 +133,7 @@ impl Game {
     pub fn default_event_handler(&mut self, event: GameEvent, ability_order: &AbilityOrdering) {
         use GameEvent::*;
         match event {
-            StartTurn(player_id) => {
-                // in reverse because event_stack is lifo
-                for turn_step in DEFAULT_TURN_STRUCTURE.iter().rev() {
-                    self.event_stack.push(Step(*turn_step, player_id));
-                }
-            },
-            Step(step, player_id) => self.handle_step_event(step, player_id, ability_order), 
+            Step(step) => self.handle_step_event(step, ability_order), 
 
             DrawCard(player_id) => {
                 let drawn_card = self.cards.draw(player_id);
@@ -169,6 +172,7 @@ impl Game {
                 // the map the get around the borrow checker. 
                 // a better solution in which abilities are not stored in the game object,
                 // or the abilities not being able to modify the game directly
+                // TODO: activated abilities should go on the stack, not be run directly
                 let ability = self.abilities.remove(&as_ability.ability).expect("Invalid ability ID should not be possible");
                 match ability.base.class {
                     AbilityClass::Activated(_, ref ability) => ability.activate(as_ability.ability, as_ability.perm, self),
@@ -183,6 +187,49 @@ impl Game {
             Sacrifice(_, _) => todo!(),
             AddCounters(_, _, _, _) => todo!(),
             RemoveCounters(_, _, _, _) => todo!(),
+
+
+            GivePriority(player, first) => {
+                if !first && player == self.player_with_last_action  {
+                    self.push_event(TryResolveStackObject);
+                } else {
+                    let new_event = match self.give_priority(player) {
+                        Some(event) => {
+                            self.player_with_last_action = player;
+                            event
+                        }
+                        None => GameEvent::GivePriority(self.next_player(player), false)
+                    };
+                    self.push_event(new_event)
+                }
+            },
+
+            TryResolveStackObject => 
+                self.game_stack.pop().iter().for_each(
+                    |_obj| todo!()
+                ),
+
+            NextStep => {
+                let current_step = DEFAULT_TURN_STRUCTURE
+                    .iter()
+                    .enumerate()
+                    .find(|turn| self.turn_step == *turn.1)
+                    .expect("Current Turn should be in turn structure.").0;
+                let next_step = current_step + 1;
+
+                let next_step_event = if next_step == DEFAULT_TURN_STRUCTURE.len() {
+                    StartTurn(self.next_player(self.active_player))
+                } else {
+                    Step(DEFAULT_TURN_STRUCTURE[next_step])
+                };
+
+                self.push_event(next_step_event)
+            },
+
+            StartTurn(player) => {
+                self.active_player = player;
+                self.push_event(Step(DEFAULT_TURN_STRUCTURE[0]))
+            },
         }
     }
 
@@ -258,65 +305,80 @@ impl Game {
         ability_order.query(self, query);
     }
 
-    pub fn handle_step_event(&mut self, turn_step: TurnStep, player_id: PlayerID, ability_order: &AbilityOrdering) {
+    pub fn handle_step_event(&mut self, turn_step: TurnStep, ability_order: &AbilityOrdering) {
         use TurnStep::*;
         use GameEvent::*;
+
+        self.turn_step = turn_step;
+
+        /// Whether or not this turn gives priority
+        let mut priority = false;
+
         match turn_step {
             Untap => {
                 self.battlefield.values().for_each(|perm|
-                    if player_id == perm.owner && perm.tapped {
+                    if self.active_player == perm.owner && perm.tapped {
                         self.event_stack.push(UntapPerm(perm.id))
                     }
                 )
             }
+
             Upkeep => {},
-            Draw => self.event_stack.push(DrawCard(player_id)),
-            FirstMainPhase => self.main_phase(player_id, ability_order),
-            Combat => todo!(),
-            SecondMainPhase => todo!(),
+
+            Draw => self.event_stack.push(DrawCard(self.active_player)),
+
+            FirstMainPhase => priority = true,
+
+            Combat => priority = true,
+
+            SecondMainPhase => priority = true,
+
             Discard => todo!(),
+
             CleanUp => todo!(),
         }
+
+        self.event_stack.push(NextStep);
+        if priority {
+            self.event_stack.push(GivePriority(self.active_player, true));
+        } 
     }
 
-    pub fn main_phase(&mut self, player_id: PlayerID, ability_order: &AbilityOrdering) {
+    pub fn give_priority(&mut self, player_id: PlayerID) -> Option<GameEvent> {
         // We are in the midst of applying a game event, so it thinks it isn't fresh, but since
         // nothing has happened yet, it still is. This merely helps clean up the logs
-        ability_order.set_fresh();
-        loop {
-            let mut player_actions = vec![PlayerAction::Pass];
+        let ability_order = self.build_ability_order();
 
-            // collect all abilities, then sort into type and if the player controls the ability
-            for assigned_ability in self.all_abilities(&ability_order) {
-                let player = self.get(assigned_ability.perm).owner;
+        let mut player_actions = vec![PlayerAction::Pass];
 
-                if player != player_id {continue}
-                player_actions.push(
-                    PlayerAction::ActivateAbility(assigned_ability, self.get(assigned_ability.ability).base.description.clone())
-                );
-            }
+        // collect all abilities, then sort into type and if the player controls the ability
+        for assigned_ability in self.all_abilities(&ability_order) {
+            let player = self.get(assigned_ability.perm).owner;
 
-            // collect all abilities, then sort into type and if the player controls the ability
-            for assigned_card_play in self.all_card_plays(&ability_order) {
-                let player = self.get(assigned_card_play.card).owner;
-
-                if player != player_id {continue}
-                player_actions.push(
-                    PlayerAction::CardPlay(assigned_card_play, self.get(assigned_card_play.card_play).description.clone())
-                );
-            }
-
-            // TODO implement checking of cost and payment + rejection if not good
-            let new_event = match self.client.choose_options(player_actions) {
-                PlayerAction::CardPlay(as_card_play, _) => GameEvent::PlaySpell(as_card_play),
-                PlayerAction::ActivateAbility(as_ability, _) => GameEvent::ActivateAbility(as_ability),
-                PlayerAction::Pass => break,
-            };
-
-            // TODO which main phase? always the first? really?
-            self.push_event(GameEvent::Step(TurnStep::FirstMainPhase, player_id));
-            self.push_event(new_event);
+            if player != player_id {continue}
+            player_actions.push(
+                PlayerAction::ActivateAbility(assigned_ability, self.get(assigned_ability.ability).base.description.clone())
+            );
         }
+
+        // collect all abilities, then sort into type and if the player controls the ability
+        for assigned_card_play in self.all_card_plays(&ability_order) {
+            let player = self.get(assigned_card_play.card).owner;
+
+            if player != player_id {continue}
+            player_actions.push(
+                PlayerAction::CardPlay(assigned_card_play, self.get(assigned_card_play.card_play).description.clone())
+            );
+        }
+
+        // TODO implement checking of cost and payment + rejection if not good
+        let new_event = match self.client.choose_options(player_actions) {
+            PlayerAction::CardPlay(as_card_play, _) => GameEvent::PlaySpell(as_card_play),
+            PlayerAction::ActivateAbility(as_ability, _) => GameEvent::ActivateAbility(as_ability),
+            PlayerAction::Pass => return None,
+        };
+
+        Some(new_event)
     }
 
     fn add_ability(&mut self, ability: LatentAbility) -> AbilityID {
@@ -369,14 +431,14 @@ impl Game {
         }
     }
 
-    pub fn next_player(&mut self) {
+    pub fn next_player(&mut self, before: PlayerID) -> PlayerID {
         let idx = self.players.iter()
             .enumerate()
-            .find(|player| player.1.id == self.active_player)
+            .find(|player| player.1.id == before)
             .unwrap().0;
         let new_idx = (idx + 1) % self.players.len();
 
-        self.active_player = self.players[new_idx].id; 
+        self.players[new_idx].id
     }
 
 

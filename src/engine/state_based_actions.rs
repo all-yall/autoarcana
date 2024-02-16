@@ -1,4 +1,4 @@
-use std::collections::{HashMap, hash_map::{Entry, OccupiedEntry}};
+use std::collections::{HashMap, hash_map::Entry};
 
 use super::prelude::*;
 
@@ -39,7 +39,9 @@ fn add_toughness_deaths(facade: &GameFacade, perms: &Vec<Permanent>, vec: &mut V
 
 fn should_die(facade: &GameFacade, perm: &Permanent) -> bool {
     perm.type_line.is(CardType::Creature) && 
-    perm.power_toughness.is_some_and(|pt| pt.toughness - perm.damage <= 0 )
+    perm.power_toughness
+        .as_ref()
+        .is_some_and(|pt| pt.toughness - perm.damage <= 0 )
 }
 
 fn add_no_loyalty_deaths(facade: &GameFacade, perms: &Vec<Permanent>, vec: &mut Vec<GameEvent>) {
@@ -60,7 +62,7 @@ fn add_legendary_conflicts(facade: &GameFacade, perms: &Vec<Permanent>, vec : &m
         if perm.type_line.is(CardSuperType::Legendary) {
             let entry = legend_map.entry((perm.owner, &perm.name));
             match entry {
-                Entry::Occupied(entry) => { entry.get().push(perm.id); }
+                Entry::Occupied(mut entry) => { entry.get_mut().push(perm.id); }
                 Entry::Vacant(entry) => { entry.insert(vec![perm.id]); }
             }
         }

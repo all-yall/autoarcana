@@ -54,7 +54,7 @@ impl Permanent {
             card: Some(card.id),
             is_token: false,
             owner,
-            power_toughness: card.attrs.power_toughness,
+            power_toughness: card.attrs.power_toughness.clone(),
             type_line: card.attrs.type_line.clone(),
             id,
             abilities: vec![], //TODO grab ability IDs from permanent

@@ -4,10 +4,10 @@
 /// but for now it will work.
 #[derive(Clone)]
 pub struct Counters {
-    pub plus_one_plus_one: usize,
-    pub min_one_min_one: usize,
-    pub loyalty: usize,
-    pub lore: usize,
+    pub plus_one_plus_one: u32,
+    pub min_one_min_one: u32,
+    pub loyalty: u32,
+    pub lore: u32,
 }
 
 impl Counters {

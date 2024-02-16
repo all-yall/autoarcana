@@ -14,7 +14,7 @@ pub enum GameObjectID {
     Object, // Sorceries/Instants
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnStep {
     Untap,
     Upkeep,
@@ -73,8 +73,11 @@ impl Into<EventSource> for GameRule {
 /// potentially be modified by them.
 #[derive(Debug)]
 pub enum GameEvent {
+    /// Start the given player's turn
     StartTurn(PlayerID),
-    Step(TurnStep, PlayerID),
+
+    /// Start the given step of the active player's turn
+    Step(TurnStep),
 
     /// Untap the permanent
     UntapPerm(PermanentID),
@@ -107,16 +110,28 @@ pub enum GameEvent {
     Lose(PlayerID, EventSource),
 
     /// Add counters of given kind on object
-    AddCounters(GameObjectID, CounterType, usize, EventSource),
+    AddCounters(GameObjectID, CounterType, u32, EventSource),
 
     /// Remove counters of given kind on object
-    RemoveCounters(GameObjectID, CounterType, usize, EventSource),
+    RemoveCounters(GameObjectID, CounterType, u32, EventSource),
 
     /// Permanent is registered, then Enter the Battlefield event is fired.
     RegisterPermanent(Permanent),
 
     /// The permanent has entered the battlefield.
     EnterTheBattleField(PermanentID),
+
+    /// The game tries to give the player priority. This
+    /// might instead make a ResolveStackObject event
+    GivePriority(PlayerID, bool),
+
+    /// The game tries to resolve the top object
+    /// on the stack. If stack is empty, goes to
+    /// next turn.
+    TryResolveStackObject,
+
+    /// The game moves onto the next step
+    NextStep,
 }
 
 #[derive(Debug)]
