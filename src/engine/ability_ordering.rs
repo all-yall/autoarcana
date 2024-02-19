@@ -110,8 +110,4 @@ impl AbilityOrdering {
             warn!("Using non-fresh ability ordering, could produce incorrect results.");
         }
     }
-
-    pub fn set_fresh(&self) {
-        self.fresh.set(true);
-    }
 }
