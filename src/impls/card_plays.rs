@@ -8,11 +8,11 @@ impl CastSpell {
 }
 
 impl Spawner for CastSpell {
-    fn spawn(&self, card_id: CardID, game: &Game) -> GameObject {
+    fn spawn(&self, card_id: CardID, game: &Game) -> Object {
         let new_perm_id = game.perm_ids.get_id();
         let card = game.get(card_id);
         let permanent = Permanent::from_card(card, new_perm_id, card.owner);
-        GameObject::Permanent(permanent)
+        permanent.into()
     }
 
     fn cost(&self, card_id: CardID, game: &Game) -> ManaCost {
@@ -20,6 +20,14 @@ impl Spawner for CastSpell {
     }
 }
 
-pub fn def_card_plays() -> Vec<CardPlay> {
-    vec![CardPlay::new(CastSpell::new(), "Play this card".into())]
+pub fn def_card_plays(card: &mut LatentCard) {
+    let speed = if card.attributes.type_line.is(CardType::Instant) {
+        AbilitySpeed::Instant
+    } else {
+        AbilitySpeed::Sorcery
+    };
+    
+    card.card_plays.push(
+        CardPlay::new(CastSpell::new(), format!("{}", card.attributes.name), speed)
+    );
 }

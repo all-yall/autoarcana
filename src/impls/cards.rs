@@ -6,7 +6,7 @@ pub fn get_card(name: &str) -> LatentCard {
     use CardType::*;
     use CardSuperType::*;
     use ManaType::*;
-    match name {
+    let mut ret = match name {
         "mountain" => LatentCard::new(
             "Mountain".into(),
             ManaCost::empty(),
@@ -19,8 +19,8 @@ pub fn get_card(name: &str) -> LatentCard {
                     description: "Add one red mana".into(),
                 },
             ],
-            def_card_plays(),
-            None, None,
+            vec![],
+            None
         ),
 
         "miraris wake" => LatentCard::new(
@@ -40,8 +40,8 @@ pub fn get_card(name: &str) -> LatentCard {
                     description: "Whenever you tap a land for mana, add one mana of any type that land produced.".into(),
                 }
             ],
-            def_card_plays(),
-            None, None,
+            vec![],
+            None
         ),
 
         "goblin assailant" => LatentCard::new(
@@ -50,10 +50,13 @@ pub fn get_card(name: &str) -> LatentCard {
             "What he lacks in patience, intelligence, empathy, lucidity, hygiene, ability to follow orders, self-regard, and discernible skills, he makes up for in sheer chaotic violence.".into(),
             TypeLine::empty().add(Creature).add("Goblin").add("Warrior"),
             vec![],
-            def_card_plays(),
-            Some(2), Some(2),
+            vec![],
+            Some((2, 2))
         ),
 
         other => panic!("no card named '{}'", other),
-    }
+    };
+
+    def_card_plays(&mut ret);
+    ret
 }
