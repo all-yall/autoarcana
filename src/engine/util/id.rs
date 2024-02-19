@@ -25,7 +25,10 @@ impl<T> Clone for ID<T> {
 
 impl<T> Debug for ID<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("'{} ID {}'", type_name::<T>(), self.0))
+        let full_type_name = type_name::<T>();
+        let loc = full_type_name.len() - full_type_name.chars().rev().position(|c| c == ':').unwrap_or(0);
+        let short_type_name = &full_type_name[loc..];
+        f.write_str(&format!("'{}_{}'", short_type_name, self.0))
     }
 }
 

@@ -14,7 +14,7 @@ use super::util::id::{
     IDMapper,
 };
 
-use log::info;
+use log::{info, error};
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
 
@@ -127,19 +127,26 @@ impl Game {
     /// Queues an event to be processed by the game. Keep in mind that 
     /// events are processed in a Last-in First-out order.
     pub fn push_event(&mut self, event: GameEvent) {
+        info!("   Event pushed {:?}", event);
         self.event_stack.push(event);
     }
 
-    pub fn default_event_handler(&mut self, event: GameEvent, ability_order: &AbilityOrdering) {
+    pub fn push_events<I: IntoIterator<Item = GameEvent>>(&mut self, events: I) {
+        for event in events.into_iter() {
+            self.push_event(event)
+        }
+    }
+
+    pub fn default_event_handler(&mut self, event: GameEvent) {
         use GameEvent::*;
         match event {
-            Step(step) => self.handle_step_event(step, ability_order), 
+            Step(step) => self.handle_step_event(step), 
 
             DrawCard(player_id) => {
                 let drawn_card = self.cards.draw(player_id);
                 // Couldn't draw a card, lose the game.
                 if drawn_card.is_none() { 
-                    self.event_stack.push(Lose(player_id, GameRule::CouldntDraw.into()));
+                    self.push_event(Lose(player_id, GameRule::CouldntDraw.into()));
                 }
             }
 
@@ -159,21 +166,20 @@ impl Game {
             }
 
             AddMana(player_id, mana_type, _) => {
-                self.get_player(player_id).mana_pool.push(mana_type);
+                self.get_mut(player_id).mana_pool.push(mana_type);
             }
 
             PlaySpell(as_card_play) => {
                 let card_play = self.get(as_card_play.card_play);
                 let object = card_play.spawn.spawn(as_card_play.card, self);
-                self.game_stack.push(object);
-                self.cards.move_to_zone(as_card_play.card, Zone::Stack);
 
-                let player = self.get(as_card_play.card).owner;
-                self.push_event(GivePriority(player, true));
-
-                let is_land = self.get(as_card_play.card).attrs.type_line.is(CardType::Land);
-                if is_land {
-                    self.push_event(TryResolveStackObject);
+                if let ObjectResolve::CreateLand(perm) = object.resolve {
+                    // Lands skip the stack and enter the battlefield directly
+                    self.push_event(RegisterPermanent(perm));
+                    self.cards.move_to_zone(as_card_play.card, Zone::Battlefield);
+                } else {
+                    self.game_stack.push(object);
+                    self.cards.move_to_zone(as_card_play.card, Zone::Stack);
                 }
             }
 
@@ -199,35 +205,23 @@ impl Game {
             RemoveCounters(_, _, _, _) => todo!(),
 
 
-            GivePriority(player, first) => {
-                if !first && player == self.player_with_last_action  {
-                    self.push_event(TryResolveStackObject);
-                } else {
-                    match self.can_give_priority(player)  {
-                        Ok(ordering) =>  {
-                            let new_event = match self.give_priority(player, ordering) {
-                                Some(event) => {
-                                    self.player_with_last_action = player;
-                                    event
-                                }
-                                None => GameEvent::GivePriority(self.next_player(player), false)
-                            };
-                            self.push_event(new_event)
-                        }
+            GivePriority(player) => {
+                self.player_with_last_action = player;
+                self.try_give_priority(player);
+            }
 
-                        Err(events) => {
-                            self.push_event(GivePriority(player, first));
-                            events.into_iter().for_each(|event| 
-                                self.push_event(event)
-                            )
-                        }
-                    }
+            PassPriority(player) => {
+                if player == self.player_with_last_action {
+                    self.push_event(TryResolveStackObject)
+                } else {
+                    let ability_order = self.build_ability_order();
+                    self.priority(player, ability_order);
                 }
             },
 
             TryResolveStackObject =>  {
                 if let Some(object) = self.game_stack.pop() {
-                    self.push_event(GivePriority(self.active_player, true));
+                    self.push_event(GivePriority(self.active_player));
                     match object.resolve {
                         ObjectResolve::CreatePerm(perm) => {
                             self.push_event(RegisterPermanent(perm));
@@ -237,6 +231,7 @@ impl Game {
                             }
                         }
                         ObjectResolve::AbilityActivate(_) => todo!(),
+                        ObjectResolve::CreateLand(perm) => error!("Land was on the stack, this shouldn't happen. {:?}", perm),
                     }
                 }
             }
@@ -337,56 +332,66 @@ impl Game {
         ability_order.query(self, query);
     }
 
-    pub fn handle_step_event(&mut self, turn_step: TurnStep, ability_order: &AbilityOrdering) {
+    pub fn handle_step_event(&mut self, turn_step: TurnStep) {
         use TurnStep::*;
         use GameEvent::*;
 
         self.turn_step = turn_step;
+        self.push_event(NextStep);
 
         // Whether or not this turn gives priority
-        let mut priority = false;
-
         match turn_step {
             Untap => {
-                self.battlefield.values().for_each(|perm|
-                    if self.active_player == perm.owner && perm.tapped {
-                        self.event_stack.push(UntapPerm(perm.id))
-                    }
-                )
+
+               let events: Vec<_> = self.battlefield.values().filter_map(|perm|
+                    (self.active_player == perm.owner && perm.tapped)
+                        .then_some(UntapPerm(perm.id))
+                ).collect();
+
+                self.push_events(events)
             }
 
-            Upkeep => {},
+            Upkeep => {
+            },
 
-            Draw => self.event_stack.push(DrawCard(self.active_player)),
+            Draw => {
+                self.push_event(GivePriority(self.active_player));
+                self.push_event(DrawCard(self.active_player));
+            }
 
-            FirstMainPhase => priority = true,
+            FirstMainPhase => {
+                self.push_event(GivePriority(self.active_player));
+            }
 
-            Combat => priority = true,
+            Combat =>  {
+                self.push_event(GivePriority(self.active_player));
+            }
 
-            SecondMainPhase => priority = true,
+            SecondMainPhase => {
+                self.push_event(GivePriority(self.active_player));
+            }
 
             Discard => todo!(),
 
             CleanUp => todo!(),
         }
-
-        self.event_stack.push(NextStep);
-        if priority {
-            self.event_stack.push(GivePriority(self.active_player, true));
-        } 
     }
 
-    pub fn can_give_priority(&mut self, player_id: PlayerID) -> Result<AbilityOrdering, Vec<GameEvent>> {
+    pub fn try_give_priority(&mut self, player: PlayerID) {
+        // First check state based actions.
         let facade = GameFacade::new(self);
-        let actions = check_state_based_actions(&facade);
-        if actions.is_empty() {
-            Ok(facade.into())
-        } else {
-            Err(actions)
+        let before_give_priority_events = check_state_based_actions(&facade);
+        if before_give_priority_events.len() > 0 {
+            self.push_event(GameEvent::GivePriority(player));
+            self.push_events(before_give_priority_events);
+            return;
         }
+
+        // if there were none, then give the player priority
+        self.priority(player, facade.into());
     }
 
-    pub fn give_priority(&mut self, player_id: PlayerID, ability_order: AbilityOrdering) -> Option<GameEvent> {
+    pub fn priority(&mut self, player_id: PlayerID, ability_order: AbilityOrdering) {
 
         let mut player_actions = vec![PlayerAction::Pass];
 
@@ -421,10 +426,14 @@ impl Game {
         let new_event = match self.client.choose_options(player_actions) {
             PlayerAction::CardPlay(as_card_play, _) => GameEvent::PlaySpell(as_card_play),
             PlayerAction::ActivateAbility(as_ability, _) => GameEvent::ActivateAbility(as_ability),
-            PlayerAction::Pass => return None,
+            PlayerAction::Pass => {
+                self.push_event(GameEvent::PassPriority(self.next_player(player_id)));
+                return;
+            },
         };
 
-        Some(new_event)
+        self.push_event(GameEvent::GivePriority(player_id));
+        self.push_event(new_event);
     }
 
     fn can_play_sorceries(&self, player: PlayerID) -> bool {
@@ -445,18 +454,6 @@ impl Game {
         self.card_plays.insert(id, card_play);
         id
     }
-    
-    fn remove_ability(&mut self, id: AbilityID) {
-        self.abilities.remove(&id);
-    }
-
-    pub fn get_player(&mut self, id: PlayerID) -> &mut Player {
-        self.players.iter_mut().find(|player| player.id == id).unwrap()
-    }
-
-    pub fn active_player(&mut self) -> &mut Player {
-        self.get_player(self.active_player)
-    }
 
     pub fn run(&mut self) {
         info!("gameloop: Starting game loop");
@@ -465,30 +462,30 @@ impl Game {
 
         loop {
             let event = self.event_stack.pop().unwrap();
-            info!("gameloop: Processing event {:?}", event);
+            info!("gameloop: {} events queued and Current event {:?}", self.event_stack.len(), event);
 
             let event = match ability_order.listen(event, self) {
                 ListenResult::Replaced(new_evs) => {
                     info!("Event Replaced with {} event(s)", new_evs.len());
-                    self.event_stack.extend(new_evs.into_iter());
+                    self.push_events(new_evs);
                     continue;
                 }
                 ListenResult::Triggered(ev, new_evs) => {
                     info!("Event triggered {} event(s)", new_evs.len());
-                    self.event_stack.extend(new_evs.into_iter());
+                    self.push_events(new_evs);
                     ev
                 }
                 ListenResult::Ignored(ev) => ev
             };
 
             // The event wasn't canceled, so we are now applying it.
-            self.default_event_handler(event, &ability_order);
+            self.default_event_handler(event);
             // The game state has changed, so the ability order should be updated.
             ability_order = AbilityOrdering::build_from(self);
         }
     }
 
-    pub fn next_player(&mut self, before: PlayerID) -> PlayerID {
+    pub fn next_player(&self, before: PlayerID) -> PlayerID {
         let idx = self.players.iter()
             .enumerate()
             .find(|player| player.1.id == before)
@@ -496,19 +493,6 @@ impl Game {
         let new_idx = (idx + 1) % self.players.len();
 
         self.players[new_idx].id
-    }
-
-
-    pub fn get_player_id_from_perm_id(&mut self, perm_id: PermanentID) -> PlayerID {
-        self.get_perm_from_perm_id(perm_id).owner
-    }
-
-    pub fn get_player_id_from_card_id(&mut self, card_id: CardID) -> PlayerID {
-        self.get(card_id).owner
-    }
-
-    pub fn get_perm_from_perm_id(&mut self, perm_id: PermanentID) -> &mut Permanent {
-        self.battlefield.get_mut(&perm_id).unwrap()
     }
 }
 

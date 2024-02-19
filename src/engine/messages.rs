@@ -127,13 +127,15 @@ pub enum GameEvent {
     /// The permanent has entered the battlefield.
     EnterTheBattleField(PermanentID),
 
-    /// The game tries to give the player priority. This
-    /// might instead make a ResolveStackObject event
-    GivePriority(PlayerID, bool),
+    /// The game gives the player priority
+    GivePriority(PlayerID),
+
+    /// The game tries to pass prioirity. It might 
+    /// resolve into a 'TryResolveStackObject' action.
+    PassPriority(PlayerID),
 
     /// The game tries to resolve the top object
-    /// on the stack. If stack is empty, goes to
-    /// next turn.
+    /// on the stack. If stack is empty, does nothing
     TryResolveStackObject,
 
     /// The game moves onto the next step
