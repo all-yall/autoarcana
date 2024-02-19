@@ -78,20 +78,28 @@ impl AbilityOrdering {
         for as_ability in self.replacement_order.iter().chain(self.trigger_order.iter()) {
             let ability = game.get(as_ability.ability);
             let result = ability.listen(as_ability.perm, event, game); 
-
-            new_events.extend(result.1);
-            if let Some(ev) = result.0 {
-                event = ev;
-            } else {
-                return (None, new_events);
+            match result {
+                ListenResult::Replaced(_) => return result,
+                ListenResult::Triggered(ev, triggered) => {
+                    event = ev;
+                    new_events.extend(triggered);
+                }
+                ListenResult::Ignored(ev) => {
+                    event = ev;
+                }
             }
         }
 
-        // if an Some(event) is returned, then it will be applied to the game
-        // state, and this ordering may no longer be fresh.
-        self.fresh.set(false);
+        if new_events.is_empty() {
+            ListenResult::Ignored(event)
+        } else {
+            // if an Some(event) is returned, then it will be applied to the game
+            // state, and this ordering may no longer be fresh.
+            self.fresh.set(false);
 
-        (Some(event), new_events)
+            ListenResult::Triggered(event, new_events)
+        }
+
     }
 
     /// A sanity checking function; In the event that the abilityOrder 

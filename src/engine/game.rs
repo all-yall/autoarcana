@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
 };
 
-use super::prelude::*;
+use super::{prelude::*, state_based_actions::check_state_based_actions};
 
 use crate::client::{Client, PlayerAction, GameStateSnapshot};
 
@@ -31,7 +31,7 @@ pub struct Game {
     pub turn_number: usize,
     pub game_over: bool,
     pub event_stack: Vec<GameEvent>,
-    pub game_stack: Vec<GameObject>,
+    pub game_stack: Vec<Object>,
     pub cards: CardStore,
 
     pub battlefield: BTreeMap<PermanentID, Permanent>,
@@ -164,7 +164,17 @@ impl Game {
 
             PlaySpell(as_card_play) => {
                 let card_play = self.get(as_card_play.card_play);
-                card_play.spawn.spawn(as_card_play.card, self);
+                let object = card_play.spawn.spawn(as_card_play.card, self);
+                self.game_stack.push(object);
+                self.cards.move_to_zone(as_card_play.card, Zone::Stack);
+
+                let player = self.get(as_card_play.card).owner;
+                self.push_event(GivePriority(player, true));
+
+                let is_land = self.get(as_card_play.card).attrs.type_line.is(CardType::Land);
+                if is_land {
+                    self.push_event(TryResolveStackObject);
+                }
             }
 
             ActivateAbility(as_ability) => {
@@ -193,21 +203,43 @@ impl Game {
                 if !first && player == self.player_with_last_action  {
                     self.push_event(TryResolveStackObject);
                 } else {
-                    let new_event = match self.give_priority(player) {
-                        Some(event) => {
-                            self.player_with_last_action = player;
-                            event
+                    match self.can_give_priority(player)  {
+                        Ok(ordering) =>  {
+                            let new_event = match self.give_priority(player, ordering) {
+                                Some(event) => {
+                                    self.player_with_last_action = player;
+                                    event
+                                }
+                                None => GameEvent::GivePriority(self.next_player(player), false)
+                            };
+                            self.push_event(new_event)
                         }
-                        None => GameEvent::GivePriority(self.next_player(player), false)
-                    };
-                    self.push_event(new_event)
+
+                        Err(events) => {
+                            self.push_event(GivePriority(player, first));
+                            events.into_iter().for_each(|event| 
+                                self.push_event(event)
+                            )
+                        }
+                    }
                 }
             },
 
-            TryResolveStackObject => 
-                self.game_stack.pop().iter().for_each(
-                    |_obj| todo!()
-                ),
+            TryResolveStackObject =>  {
+                if let Some(object) = self.game_stack.pop() {
+                    self.push_event(GivePriority(self.active_player, true));
+                    match object.resolve {
+                        ObjectResolve::CreatePerm(perm) => {
+                            self.push_event(RegisterPermanent(perm));
+
+                            if let Some(card) = object.card {
+                                self.cards.move_to_zone(card, Zone::Battlefield);
+                            }
+                        }
+                        ObjectResolve::AbilityActivate(_) => todo!(),
+                    }
+                }
+            }
 
             NextStep => {
                 let current_step = DEFAULT_TURN_STRUCTURE
@@ -311,7 +343,7 @@ impl Game {
 
         self.turn_step = turn_step;
 
-        /// Whether or not this turn gives priority
+        // Whether or not this turn gives priority
         let mut priority = false;
 
         match turn_step {
@@ -344,14 +376,24 @@ impl Game {
         } 
     }
 
-    pub fn give_priority(&mut self, player_id: PlayerID) -> Option<GameEvent> {
-        // We are in the midst of applying a game event, so it thinks it isn't fresh, but since
-        // nothing has happened yet, it still is. This merely helps clean up the logs
-        let ability_order = self.build_ability_order();
+    pub fn can_give_priority(&mut self, player_id: PlayerID) -> Result<AbilityOrdering, Vec<GameEvent>> {
+        let facade = GameFacade::new(self);
+        let actions = check_state_based_actions(&facade);
+        if actions.is_empty() {
+            Ok(facade.into())
+        } else {
+            Err(actions)
+        }
+    }
+
+    pub fn give_priority(&mut self, player_id: PlayerID, ability_order: AbilityOrdering) -> Option<GameEvent> {
 
         let mut player_actions = vec![PlayerAction::Pass];
 
+        let keep_sorcery_speed = self.can_play_sorceries(player_id);
+
         // collect all abilities, then sort into type and if the player controls the ability
+        // TODO Sort based on speed! (not implemented for abilities rn)
         for assigned_ability in self.all_abilities(&ability_order) {
             let player = self.get(assigned_ability.perm).owner;
 
@@ -365,7 +407,11 @@ impl Game {
         for assigned_card_play in self.all_card_plays(&ability_order) {
             let player = self.get(assigned_card_play.card).owner;
 
+            // only card plays for cards the current player owns
             if player != player_id {continue}
+            // only card plays that match the player's allowed speed
+            if self.get(assigned_card_play.card_play).speed == AbilitySpeed::Sorcery && !keep_sorcery_speed { continue }
+
             player_actions.push(
                 PlayerAction::CardPlay(assigned_card_play, self.get(assigned_card_play.card_play).description.clone())
             );
@@ -379,6 +425,12 @@ impl Game {
         };
 
         Some(new_event)
+    }
+
+    fn can_play_sorceries(&self, player: PlayerID) -> bool {
+        player == self.active_player 
+        && self.turn_step.is_main_phase() 
+        && self.game_stack.is_empty()
     }
 
     fn add_ability(&mut self, ability: LatentAbility) -> AbilityID {
@@ -414,20 +466,25 @@ impl Game {
         loop {
             let event = self.event_stack.pop().unwrap();
             info!("gameloop: Processing event {:?}", event);
-            let (maybe_original_event, new_events) = ability_order.listen(event, self);
-            info!("gameloop: In response, {} events were added", new_events.len());
-            self.event_stack.extend(new_events.into_iter());
+
+            let event = match ability_order.listen(event, self) {
+                ListenResult::Replaced(new_evs) => {
+                    info!("Event Replaced with {} event(s)", new_evs.len());
+                    self.event_stack.extend(new_evs.into_iter());
+                    continue;
+                }
+                ListenResult::Triggered(ev, new_evs) => {
+                    info!("Event triggered {} event(s)", new_evs.len());
+                    self.event_stack.extend(new_evs.into_iter());
+                    ev
+                }
+                ListenResult::Ignored(ev) => ev
+            };
 
             // The event wasn't canceled, so we are now applying it.
-            if let Some(event) = maybe_original_event {
-                info!("gameloop: Event wasn't consumed, though may have been modified. It is now: {:?}", event);
-                self.default_event_handler(event, &ability_order);
-                // The game state has changed, so the ability order should be updated.
-                info!("gameloop: Rebuilding ability order");
-                ability_order = AbilityOrdering::build_from(self);
-            } else {
-                info!("gameloop: Event was consumed.")
-            }
+            self.default_event_handler(event, &ability_order);
+            // The game state has changed, so the ability order should be updated.
+            ability_order = AbilityOrdering::build_from(self);
         }
     }
 

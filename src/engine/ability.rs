@@ -1,3 +1,5 @@
+use log::warn;
+
 use crate::engine::prelude::*;
 
 use super::util::id::ID;
@@ -25,10 +27,11 @@ pub enum AbilityClass {
 pub type AbilityID = ID<Ability>;
 
 /// Represents replacement and addition to existing game events.
-/// if the event is consumed, the first field should be None.
-/// if additional events are fired in response to the given one, then
-/// those should be put in the vector in the reverse order of evaluation.
-pub type ListenResult = (Option<GameEvent>, Vec<GameEvent>);
+pub enum ListenResult {
+    Replaced(Vec<GameEvent>),
+    Triggered(GameEvent, Vec<GameEvent>),
+    Ignored(GameEvent),
+}
 
 pub struct Ability {
     pub id: AbilityID,
@@ -47,7 +50,10 @@ impl Ability {
         match self.base.class {
             AbilityClass::Replacement(ref a) => a.listen(self.id, perm, event, game),
             AbilityClass::Triggered(ref a) => a.listen(self.id, perm, event, game),
-            _ => (Some(event), vec![])
+            _ => {
+                warn!("Listen called for {:?}, which is neither Replacement, nor Triggered", self.id);
+                ListenResult::Ignored(event)
+            }
         }
     }
 
@@ -63,6 +69,12 @@ pub struct LatentAbility {
     pub cost: Cost,
     pub class: AbilityClass,
     pub description: String,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum AbilitySpeed {
+    Instant,
+    Sorcery,
 }
 
 pub trait Effect{

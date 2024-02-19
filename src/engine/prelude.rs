@@ -14,4 +14,5 @@ pub use crate::engine::{
     messages::*,
     game_facade::*,
     counters::*,
+    object::*,
 };

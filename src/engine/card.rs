@@ -39,8 +39,8 @@ pub struct Attributes {
 }
 
 impl LatentCard {
-    pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_plays: Vec<CardPlay>, power: Option<i32>, toughness: Option<i32>) -> Self {
-        let power_toughness = power.map(|p| toughness.map(|t| PowerToughness::new(p,t))).unwrap_or(None);
+    pub fn new(name: String, cost: ManaCost,  flavor: String, type_line: TypeLine, perm_abilities: Vec<LatentAbility>, card_plays: Vec<CardPlay>, power_toughness: Option<(i32, i32)>) -> Self {
+        let power_toughness = power_toughness.map(|(p, t)|PowerToughness::new(p, t));
         let cost = Some(cost);
         let attributes = Attributes { 
             name,

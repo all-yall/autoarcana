@@ -41,3 +41,9 @@ impl<'a> GameFacade<'a> {
         query.perm
     }
 }
+
+impl<'a> Into<AbilityOrdering> for GameFacade<'a> {
+    fn into(self) -> AbilityOrdering {
+        self.ability_order
+    }
+}

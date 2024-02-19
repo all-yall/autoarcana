@@ -11,8 +11,8 @@ impl NullEffect {
 impl Effect for NullEffect {}
 
 impl EventModifier for NullEffect {
-    fn listen(&self, _ability: AbilityID, perm: PermanentID, event: GameEvent, _game: &Game) -> ListenResult {
-        (Some(event), vec![])
+    fn listen(&self, _: AbilityID, _: PermanentID, event: GameEvent, _: &Game) -> ListenResult {
+        event.ignored()
     }
 }
 
@@ -53,7 +53,6 @@ impl MiraisMana {
 impl Effect for MiraisMana {}
 impl EventModifier for MiraisMana {
     fn listen(&self, _: AbilityID, perm: PermanentID, event: GameEvent, game: &Game) -> ListenResult {
-        let mut additional = vec![];
         match event {
             GameEvent::AddMana(player_id_recv_mana, mana_type, EventSource::Permanent(perm_source)) => {
                 // TODO change this to use queries instead of reading game state.
@@ -62,16 +61,16 @@ impl EventModifier for MiraisMana {
                 let i_am_the_reciever = game.get(perm).owner == player_id_recv_mana;
                 let mana_is_from_a_land = game.get(perm_source).type_line.is(CardType::Land);
                 if i_am_the_reciever && mana_is_from_a_land {
-                    additional.push(
+                    return event.triggered(
                         GameEvent::AddMana(
                             player_id_recv_mana, 
                             mana_type, 
-                            EventSource::Permanent(perm)));
+                            EventSource::Permanent(perm))
+                    );
                 }
             }
             _ => {}
         }
-
-        (Some(event), additional)
+        event.ignored()
     }
 }

@@ -14,5 +14,6 @@ pub mod messages;
 pub mod game_facade;
 pub mod state_based_actions;
 pub mod counters;
+pub mod object;
 
 pub mod prelude;

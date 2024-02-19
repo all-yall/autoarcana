@@ -26,6 +26,12 @@ pub enum TurnStep {
     CleanUp,
 }
 
+impl TurnStep {
+    pub fn is_main_phase(self) -> bool {
+        self == Self::FirstMainPhase || self == Self::SecondMainPhase
+    }
+}
+
 pub const DEFAULT_TURN_STRUCTURE: [TurnStep; 8] = [
     TurnStep::Untap,
     TurnStep::Upkeep,
@@ -132,6 +138,20 @@ pub enum GameEvent {
 
     /// The game moves onto the next step
     NextStep,
+}
+
+impl GameEvent {
+    pub fn triggered(self, another: Self) -> ListenResult {
+        ListenResult::Triggered(self, vec![another]) 
+    }
+
+    pub fn ignored(self) -> ListenResult {
+        ListenResult::Ignored(self)
+    }
+
+    pub fn replaced(self, by: Self) -> ListenResult {
+        ListenResult::Replaced(vec![by])
+    }
 }
 
 #[derive(Debug)]
