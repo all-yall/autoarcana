@@ -15,8 +15,10 @@ impl Spawner for CastSpell {
         permanent.into()
     }
 
-    fn cost(&self, card_id: CardID, game: &Game) -> ManaCost {
-        game.get(card_id).attrs.cost.clone().unwrap_or_else(ManaCost::empty)
+    fn cost(&self, card_id: CardID, game: &Game) -> Cost {
+        game.get(card_id).attrs.cost.clone()
+            .map(|mana_cost| Cost::empty().with_mana(mana_cost))
+            .unwrap_or_else(Cost::empty)
     }
 }
 

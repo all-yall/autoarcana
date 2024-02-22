@@ -29,6 +29,6 @@ impl CardPlay {
 
 pub trait Spawner {
     fn spawn(&self, card: CardID, game: &Game) -> Object;
-    fn cost(&self, card_id: CardID, game: &Game) -> ManaCost;
+    fn cost(&self, card_id: CardID, game: &Game) -> Cost;
 }
 

@@ -14,9 +14,14 @@ use super::util::id::{
     IDMapper,
 };
 
-use log::{info, error};
+use log::{info, warn, error};
 use tokio::sync::broadcast::{channel, Sender as BroadcastSender};
 
+#[derive(Debug)]
+pub enum FailureReason {
+    CouldntPayCost,
+    IllegalAbilityClass
+}
 
 /// The Game object contains all game information
 /// and additionally acts as a store for all game
@@ -161,6 +166,13 @@ impl Game {
 
             RegisterPermanent(perm) => {
                 let id = perm.id;
+                if !perm.is_token {
+                    if let Some(card) = perm.card {
+                        self.cards.move_to_zone(card, Zone::Battlefield);
+                    } else {
+                        warn!("Non-token permanent has no card {:?}", perm);
+                    }
+                }
                 self.battlefield.insert(id, perm);
                 self.push_event(EnterTheBattleField(id));
             }
@@ -176,7 +188,6 @@ impl Game {
                 if let ObjectResolve::CreateLand(perm) = object.resolve {
                     // Lands skip the stack and enter the battlefield directly
                     self.push_event(RegisterPermanent(perm));
-                    self.cards.move_to_zone(as_card_play.card, Zone::Battlefield);
                 } else {
                     self.game_stack.push(object);
                     self.cards.move_to_zone(as_card_play.card, Zone::Stack);
@@ -192,7 +203,10 @@ impl Game {
                 let ability = self.abilities.remove(&as_ability.ability).expect("Invalid ability ID should not be possible");
                 match ability.base.class {
                     AbilityClass::Activated(_, ref ability) => ability.activate(as_ability.ability, as_ability.perm, self),
-                    _ => panic!("Expected activated ability for ActivateAbility event")
+                    _ => {
+                        error!("Expected activated ability for ActivateAbility event {:?}", as_ability); 
+                        panic!();
+                    }
                 }
                 self.abilities.insert(as_ability.ability, ability);
             }
@@ -250,12 +264,41 @@ impl Game {
                     Step(DEFAULT_TURN_STRUCTURE[next_step])
                 };
 
+                if self.event_stack.len() != 0 {
+                    warn!("When changing turns, event stack should be empty. Instead, it holds {} events", self.event_stack.len())
+                }
                 self.push_event(next_step_event)
             },
 
             StartTurn(player) => {
                 self.active_player = player;
                 self.push_event(Step(DEFAULT_TURN_STRUCTURE[0]))
+            },
+
+            TapPerm(perm) => {
+                let perm = self.get_mut(perm);
+                if perm.tapped {
+                    warn!("Tried to tap already tapped permanent!")
+                }
+                perm.tapped = true;
+            }
+
+            PayMana(player, cost) => {
+                let player = self.get_mut(player);
+
+                for mana in cost.mana.iter() {
+                    let idx = player.mana_pool.iter().position(|m| m == mana);
+                    match idx {
+                        Some(idx) => {player.mana_pool.remove(idx);}
+                        None => {error!("Tried to pay {:?} out of {:?} mana pool, but it wasn't there", mana, player.id);}
+                    }
+                }
+
+                for _ in 0..cost.generic_mana {
+                    if let None = player.mana_pool.pop() {
+                        error!("Tried to pay generic mana out of {:?} mana pool, but it wasn't there", player.id)
+                    }
+                }
             },
         }
     }
@@ -312,9 +355,8 @@ impl Game {
     fn raw_query(&self, query: &mut GameQuery, ability_order: &AbilityOrdering) {
         match query {
             GameQuery::PermAbilities(ref mut query) => {
-                let base_abilities = self.battlefield
-                    .get(&query.id)
-                    .unwrap()
+                let base_abilities = self
+                    .get(query.id)
                     .abilities
                     .iter();
                 query.abilities.extend(base_abilities);
@@ -371,9 +413,19 @@ impl Game {
                 self.push_event(GivePriority(self.active_player));
             }
 
-            Discard => todo!(),
+            Discard => {
+                // TODO implement this
+            }
 
-            CleanUp => todo!(),
+            CleanUp => {
+                //todo use events
+                for perm in self.battlefield.values_mut() {
+                    if let Some(ref mut pt) = perm.power_toughness {
+                        pt.toughness = pt.base_toughness;
+                        pt.power = pt.base_power;
+                    }
+                }
+            }
         }
     }
 
@@ -392,6 +444,93 @@ impl Game {
     }
 
     pub fn priority(&mut self, player_id: PlayerID, ability_order: AbilityOrdering) {
+        loop {
+            let action = self.get_player_action(player_id, &ability_order);
+
+            match self.try_do_player_action(player_id, action) {
+                Ok(()) => return,
+                Err(reason) => warn!("Player chose invalid option; {:?}", reason),
+            }
+        }
+    }
+
+    fn try_do_player_action(&mut self, player_id: PlayerID, action: PlayerAction) -> Result<(), FailureReason> {
+
+        match action {
+            PlayerAction::Pass => {
+                self.push_event(GameEvent::PassPriority(self.next_player(player_id)));
+            }
+
+
+            PlayerAction::CardPlay(as_card_play, _) => {
+                // TODO should be a query
+                let cost = self.get(as_card_play.card_play).spawn.cost(as_card_play.card, self);
+                let events = self.try_pay_cost(player_id, cost)?;
+
+                self.push_event(GameEvent::GivePriority(player_id));
+                self.push_event(GameEvent::PlaySpell(as_card_play));
+                self.push_events(events);
+            }
+
+
+            PlayerAction::ActivateAbility(as_ability, _) => {
+                // TODO should be a query
+                let cost = match self.get(as_ability.ability).base.class {
+                    AbilityClass::Activated(ref cost, _) => cost.clone(),
+                    _ => Err(FailureReason::IllegalAbilityClass)?,
+                };
+
+                let events = self.try_pay_ability_cost(player_id, as_ability.perm, cost)?;
+
+                self.push_event(GameEvent::GivePriority(player_id));
+                self.push_event(GameEvent::ActivateAbility(as_ability));
+                self.push_events(events);
+            }
+        };
+
+            
+        Ok(())
+    }
+
+    fn try_pay_ability_cost(&mut self, player: PlayerID, perm: PermanentID, cost: AbilityCost) -> Result<Vec<GameEvent>, FailureReason> {
+        let mut ret = self.try_pay_cost(player, cost.cost)?;
+        let perm = self.get(perm);
+        if cost.tap {
+            if perm.tapped || (perm.type_line.is(CardType::Creature) && perm.summoning_sickness) {
+                Err(FailureReason::CouldntPayCost)?;
+            } else {
+                ret.push(GameEvent::TapPerm(perm.id));
+            }
+        }
+        Ok(ret)
+    }
+
+    fn try_pay_cost(&mut self, player: PlayerID, cost: Cost) -> Result<Vec<GameEvent>, FailureReason> {
+        self.try_pay_mana_cost(player, cost.mana_cost)
+    }
+
+    fn try_pay_mana_cost(&mut self, player: PlayerID, cost: ManaCost) -> Result<Vec<GameEvent>, FailureReason> {
+        let mut mana_pool = self.get(player).mana_pool.clone();
+
+        for mana in cost.mana.iter() {
+            let pos = mana_pool.iter().position(|m| m == mana);
+            match pos {
+                Some(idx) => {mana_pool.remove(idx);}
+                None => {Err(FailureReason::CouldntPayCost)?;}
+            }
+        }
+
+        // TODO let the player choose what mana
+        for _ in 0..cost.generic_mana { 
+            if let None =  mana_pool.pop() {
+                Err(FailureReason::CouldntPayCost)?
+            }
+        }
+
+        Ok(vec![GameEvent::PayMana(player, cost)])
+    }
+
+    fn get_player_action(&mut self, player_id: PlayerID, ordering: &AbilityOrdering) -> PlayerAction {
 
         let mut player_actions = vec![PlayerAction::Pass];
 
@@ -399,17 +538,24 @@ impl Game {
 
         // collect all abilities, then sort into type and if the player controls the ability
         // TODO Sort based on speed! (not implemented for abilities rn)
-        for assigned_ability in self.all_abilities(&ability_order) {
+        for assigned_ability in self.all_abilities(ordering) {
             let player = self.get(assigned_ability.perm).owner;
 
             if player != player_id {continue}
-            player_actions.push(
-                PlayerAction::ActivateAbility(assigned_ability, self.get(assigned_ability.ability).base.description.clone())
-            );
+
+            match self.get(assigned_ability.ability).base.class {
+                AbilityClass::Activated(ref cost, _) => {
+                    player_actions.push(
+                        PlayerAction::ActivateAbility(
+                            assigned_ability, 
+                            self.get(assigned_ability.ability).base.description.clone()));
+                }
+                _ => {}
+            }
         }
 
         // collect all abilities, then sort into type and if the player controls the ability
-        for assigned_card_play in self.all_card_plays(&ability_order) {
+        for assigned_card_play in self.all_card_plays(ordering) {
             let player = self.get(assigned_card_play.card).owner;
 
             // only card plays for cards the current player owns
@@ -421,19 +567,20 @@ impl Game {
                 PlayerAction::CardPlay(assigned_card_play, self.get(assigned_card_play.card_play).description.clone())
             );
         }
+        return self.client.choose_options(player_actions)
 
+            /*
         // TODO implement checking of cost and payment + rejection if not good
         let new_event = match self.client.choose_options(player_actions) {
             PlayerAction::CardPlay(as_card_play, _) => GameEvent::PlaySpell(as_card_play),
             PlayerAction::ActivateAbility(as_ability, _) => GameEvent::ActivateAbility(as_ability),
             PlayerAction::Pass => {
-                self.push_event(GameEvent::PassPriority(self.next_player(player_id)));
-                return;
             },
         };
 
         self.push_event(GameEvent::GivePriority(player_id));
         self.push_event(new_event);
+        */
     }
 
     fn can_play_sorceries(&self, player: PlayerID) -> bool {

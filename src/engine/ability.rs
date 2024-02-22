@@ -21,7 +21,12 @@ pub enum AbilityClass {
     Static(Box<dyn QueryModifier>),
     Triggered(Box<dyn EventModifier>),
     Replacement(Box<dyn EventModifier>),
-    Activated(Cost, Box<dyn OneShot>),
+    Activated(AbilityCost, Box<dyn OneShot>),
+}
+impl AbilityClass {
+    pub fn is_activated(&self) -> bool {
+        matches!(self, Self::Activated(..))
+    }
 }
 
 pub type AbilityID = ID<Ability>;
@@ -66,7 +71,6 @@ impl Ability {
 }
 
 pub struct LatentAbility {
-    pub cost: Cost,
     pub class: AbilityClass,
     pub description: String,
 }

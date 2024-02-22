@@ -57,7 +57,7 @@ impl Permanent {
             power_toughness: card.attrs.power_toughness.clone(),
             type_line: card.attrs.type_line.clone(),
             id,
-            abilities: vec![], //TODO grab ability IDs from permanent
+            abilities: card.perm_abilities.clone(),
             tapped: false,
             summoning_sickness: true,
             damage: 0,

@@ -88,6 +88,9 @@ pub enum GameEvent {
     /// Untap the permanent
     UntapPerm(PermanentID),
 
+    /// Taps the permanent
+    TapPerm(PermanentID),
+
     /// Draw a card from the top of the deck
     DrawCard(PlayerID),
 
@@ -96,6 +99,10 @@ pub enum GameEvent {
 
     /// Activates the ability. This assumes cost has already been paid.
     ActivateAbility(AssignedAbility),
+
+    /// Pays mana out of given player's pool. 
+    /// Assumes player can pay it, otherwise its an error
+    PayMana(PlayerID, ManaCost),
 
     /// GameRule firing saying one player can't control multiple of the
     /// same legendary. The player will need to put one in its owners 

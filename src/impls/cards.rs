@@ -14,8 +14,7 @@ pub fn get_card(name: &str) -> LatentCard {
             TypeLine::empty().add(Basic).add(Land).add("Mountain"),
             vec![ 
                 LatentAbility {
-                    cost: Cost::empty(),
-                    class: AbilityClass::Activated(Cost::empty().with_tap(), AddManaEffect::new(Red)),
+                    class: AbilityClass::Activated(AbilityCost::empty().with_tap(), AddManaEffect::new(Red)),
                     description: "Add one red mana".into(),
                 },
             ],
@@ -30,12 +29,11 @@ pub fn get_card(name: &str) -> LatentCard {
             TypeLine::empty().add(Enchantment),
             vec![
                 LatentAbility {
-                    cost: Cost::empty(),
+                    // TODO implement this static ability
                     class: AbilityClass::Static(NullEffect::new()),
                     description: "Creatures you control get +1/+1.".into(),
                 },
                 LatentAbility {
-                    cost: Cost::empty(),
                     class: AbilityClass::Triggered(MiraisMana::new()),
                     description: "Whenever you tap a land for mana, add one mana of any type that land produced.".into(),
                 }
